@@ -7,7 +7,7 @@ type Props = {
   tableName?: string;
 };
 
-export default function SupabaseStatus({ tableName = 'test_table' }: Props) {
+export default function SupabaseStatus({ tableName = 'employee' }: Props) {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<any[] | null>(null);
@@ -25,6 +25,7 @@ export default function SupabaseStatus({ tableName = 'test_table' }: Props) {
           setError(error.message);
           setRows(null);
         } else {
+          console.log(data);
           setRows(data ?? []);
         }
       } catch (err: any) {
