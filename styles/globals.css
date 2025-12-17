@@ -1,12 +1,16 @@
-
 @import 'leaflet/dist/leaflet.css';
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-html, body {
+html,
+body {
   height: 100%;
+}
+
+body {
+  margin: 0;
 }
 
 body {
@@ -16,7 +20,8 @@ body {
 
 /* Small helper for marker popup button */
 .rl-popup-button {
-  background-color: #0f172a; /* slate-900 */
+  background-color: #0f172a;
+  /* slate-900 */
   color: white;
   padding: 6px 10px;
   border-radius: 6px;

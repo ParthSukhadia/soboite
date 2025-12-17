@@ -13,6 +13,7 @@ export default function Page() {
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showRanking, setShowRanking] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -20,7 +21,8 @@ export default function Page() {
     try {
       const supabase = createSupabaseClient();
       if (!supabase) throw new Error('Supabase env variables not found. Ensure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are set.');
-      const { data, error } = await supabase.from(TABLE).select('*').order('rating', { ascending: false }).limit(200);
+      const { data, error } = await supabase.from("restaurants").select('*').limit(200);
+      console.log(data)
       if (error) throw error;
       setRestaurants((data as Restaurant[]) ?? []);
     } catch (err: any) {
@@ -84,40 +86,47 @@ export default function Page() {
   };
 
   return (
-    <div className="md:flex md:gap-6">
-      <div className="md:flex-1">
-        <header className="mb-4">
-          <h1 className="text-2xl font-semibold">Discover Restaurants</h1>
-          <p className="text-sm text-gray-600">Live rankings and map powered by Supabase</p>
-        </header>
+    <div className="relative h-screen">
+      <MapView restaurants={restaurants} onViewDetails={handleSelect} />
 
-        {loading && <div className="text-sm text-gray-600">Loading restaurants…</div>}
-        {error && <div className="text-sm text-red-600">{error}</div>}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {restaurants.map((r, idx) => (
-            <RestaurantCard
-              key={`${r.id ?? idx}-${String(r.name ?? '').slice(0, 12)}`}
-              restaurant={r}
-              onClick={() => handleSelect(r.id)}
-            />
-          ))}
-        </div>
-      </div>
-
-      <aside className="md:w-96 md:sticky md:top-6 mt-6 md:mt-0">
-        <div className="mb-4">
-          <h2 className="text-lg font-medium">Live Rankings</h2>
-        </div>
-        <div className="mb-6">
-          <RankingList tableName={TABLE} onSelect={handleSelect} />
-        </div>
-
+      <header className="absolute top-0 left-0 right-0 p-4 bg-black bg-opacity-50 text-white z-10 flex justify-between items-center">
         <div>
-          <h2 className="text-lg font-medium mb-2">Map</h2>
-          <MapView restaurants={restaurants} onViewDetails={handleSelect} />
+          <h1 className="text-2xl font-semibold">Discover Restaurants</h1>
+          <p className="text-sm opacity-90">Live rankings and map powered by Supabase</p>
         </div>
-      </aside>
+        <button
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          onClick={() => setShowRanking(true)}
+        >
+          Show Rankings
+        </button>
+      </header>
+
+      {loading && (
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white bg-black bg-opacity-50 p-4 rounded">
+          Loading restaurants…
+        </div>
+      )}
+      {error && (
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-red-400 bg-black bg-opacity-50 p-4 rounded">
+          {error}
+        </div>
+      )}
+
+      {showRanking && (
+        <div className="absolute inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
+            <h2 className="text-xl font-bold mb-4">Live Rankings</h2>
+            <RankingList tableName={TABLE} onSelect={(id) => { handleSelect(id); setShowRanking(false); }} />
+            <button
+              className="mt-4 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+              onClick={() => setShowRanking(false)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

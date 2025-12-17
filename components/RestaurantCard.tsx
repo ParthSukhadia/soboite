@@ -1,17 +1,27 @@
 import React from 'react';
 
 export type Restaurant = {
-  id: string | number;
+  restaurant_id: string;
   name: string;
+  city: string;
+  area: string;
+  geo_lat: number;
+  geo_lng: number;
+  cuisines: string[];
+  visited: boolean;
+  total_dishes_reviewed: number;
+  top_picks: string[];
+  meta: {
+    first_visit: string; // date as string
+    last_visit: string;
+  };
+  // Optional fields for compatibility
   hero_image_url?: string | null;
-  cuisine_tags?: string[] | null;
-  area?: string | null;
-  city?: string | null;
   rating?: number | null;
-  price_range?: number | null; // 1..3
-  top_picks?: string[] | null;
-  lat?: number | null;
-  lng?: number | null;
+  price_range?: number | null;
+
+  cuisine_tags?: string[] | null; // deprecated, use cuisines
+  id?: string | number; // deprecated, use restaurant_id
 };
 
 type Props = {
