@@ -59,7 +59,7 @@ export default function TagSelector({
 
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      {label ? <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label> : null}
       <div className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl">
         <div className="flex flex-wrap gap-2 mb-2">
           {selectedTags.map((tag) => (

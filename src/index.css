@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&display=swap');
 @import "tailwindcss";
 
 html, body, #root {
@@ -110,4 +111,65 @@ html, body, #root {
 
 .location-marker--no-heading .location-marker__arrow {
   opacity: 0;
+}
+
+.soboite-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  overflow: hidden;
+}
+
+.soboite-logo svg {
+  width: 24px;
+  height: 24px;
+}
+
+.soboite-wordmark {
+  font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.02rem;
+  font-weight: 800;
+  letter-spacing: 0.015em;
+  color: #166534;
+}
+
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #14532d, #15803d);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.brand-mark svg:last-child {
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  color: #d9f99d;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.25));
+}
+
+.brand-wordmark {
+  font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.96rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.brand-subline {
+  font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #4b5563;
+  letter-spacing: 0.08em;
 }

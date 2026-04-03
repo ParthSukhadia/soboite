@@ -3,10 +3,11 @@ import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMapEvents, use
 import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, X, Star, Utensils, SlidersHorizontal, RotateCcw } from 'lucide-react';
+import { Plus, X, Star, Utensils, SlidersHorizontal, RotateCcw, ImagePlus, Loader2 } from 'lucide-react';
 import L from 'leaflet';
 import { Restaurant } from '../types';
 import TagSelector from '../components/TagSelector';
+import PriceLevelIcon from '../components/PriceLevelIcon';
 
 function LocationMarker({ onLocation }: { onLocation?: (pos: L.LatLng) => void }) {
   const [position, setPosition] = useState<L.LatLng | null>(null);
@@ -36,14 +37,14 @@ function LocationMarker({ onLocation }: { onLocation?: (pos: L.LatLng) => void }
 
     navigator.geolocation.getCurrentPosition(handleSuccess, handleError, {
       enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 30000
+      timeout: 20000,
+      maximumAge: 0
     });
 
     const watchId = navigator.geolocation.watchPosition(handleSuccess, handleError, {
       enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 10000
+      timeout: 20000,
+      maximumAge: 0
     });
 
     return () => navigator.geolocation.clearWatch(watchId);
@@ -97,7 +98,13 @@ function SelectedRestaurantFlyTo({ restaurant }: { restaurant?: Restaurant | nul
 
   useEffect(() => {
     if (!restaurant) return;
-    map.setView([restaurant.lat, restaurant.lng], Math.max(map.getZoom(), 16), { animate: false });
+    const target = L.latLng(restaurant.lat, restaurant.lng);
+    const nextZoom = Math.max(map.getZoom(), 16);
+    map.flyTo(target, nextZoom, {
+      animate: true,
+      duration: 0.75,
+      easeLinearity: 0.2
+    });
   }, [map, restaurant]);
 
   return null;
@@ -111,6 +118,7 @@ export default function MapPage() {
     cuisines,
     flavorTags,
     editMode,
+    loading,
     addRestaurant,
     addDish,
     fetchData,
@@ -126,6 +134,8 @@ export default function MapPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [filterTypes, setFilterTypes] = useState<string[]>([]);
   const [filterCuisines, setFilterCuisines] = useState<string[]>([]);
+  const [filterLocations, setFilterLocations] = useState<string[]>([]);
+  const [filterVegOnly, setFilterVegOnly] = useState(false);
   const [costRange, setCostRange] = useState({ min: '', max: '' });
   const [restaurantPhoto, setRestaurantPhoto] = useState('');
   const [restaurantTypeSelection, setRestaurantTypeSelection] = useState('');
@@ -133,16 +143,22 @@ export default function MapPage() {
   const [customRestaurantType, setCustomRestaurantType] = useState('');
   const [customRestaurantCuisine, setCustomRestaurantCuisine] = useState('');
   const [restaurantPhotoPosition, setRestaurantPhotoPosition] = useState({ x: 50, y: 50 });
+  const [restaurantPhotoZoom, setRestaurantPhotoZoom] = useState(1);
   const [isDraggingRestaurantPhoto, setIsDraggingRestaurantPhoto] = useState(false);
   const [showDishBuilder, setShowDishBuilder] = useState(false);
+  const [isSavingRestaurant, setIsSavingRestaurant] = useState(false);
   const [addFormError, setAddFormError] = useState<string | null>(null);
   const [dishPhotos, setDishPhotos] = useState<Array<{
     id: string;
     imageUrl: string;
+    photoPosition: { x: number; y: number };
+    photoZoom: number;
     name: string;
     rating: number;
     priceLevel: number;
+    actualPrice: string;
     review: string;
+    reviewDate: string;
     cuisine: string;
     flavorTags: string[];
     isCustomCuisine: boolean;
@@ -154,6 +170,44 @@ export default function MapPage() {
   const dishPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const restaurantPhotoPreviewRef = useRef<HTMLDivElement | null>(null);
   const restaurantPhotoDragRef = useRef<{ startX: number; startY: number; x: number; y: number } | null>(null);
+  const restaurantPhotoTouchRef = useRef<{
+    mode: 'pan' | 'pinch';
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+    startDistance: number;
+    startZoom: number;
+    midpointX: number;
+    midpointY: number;
+  } | null>(null);
+  const restaurantPhotoRafRef = useRef<number | null>(null);
+  const restaurantPhotoNextPositionRef = useRef({ x: 50, y: 50 });
+  const dishPhotoDragRef = useRef<{
+    id: string;
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const dishPhotoRafRef = useRef<number | null>(null);
+  const dishPhotoNextPositionRef = useRef<{ id: string; x: number; y: number } | null>(null);
+  const dishPhotoTouchRef = useRef<{
+    id: string;
+    mode: 'pan' | 'pinch';
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+    startDistance: number;
+    startZoom: number;
+    midpointX: number;
+    midpointY: number;
+  } | null>(null);
+  const [draggingDishPhotoId, setDraggingDishPhotoId] = useState<string | null>(null);
+  const isApiBusy = loading || isSavingRestaurant;
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -196,9 +250,18 @@ export default function MapPage() {
     return Array.from(new Set(values)).sort((a, b) => a - b);
   }, [restaurants]);
 
+  const locationOptions = useMemo(() => {
+    const values = restaurants
+      .map((r) => r.locationName)
+      .filter((v): v is string => Boolean(v));
+    return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+  }, [restaurants]);
+
   const matchesFilters = (restaurant: Restaurant) => {
     const matchesType = filterTypes.length === 0 || (restaurant.type ? filterTypes.includes(restaurant.type) : false);
     const matchesCuisine = filterCuisines.length === 0 || (restaurant.cuisine ? filterCuisines.includes(restaurant.cuisine) : false);
+    const matchesLocation = filterLocations.length === 0 || (restaurant.locationName ? filterLocations.includes(restaurant.locationName) : false);
+    const matchesVegOnly = !filterVegOnly || Boolean(restaurant.vegOnly);
 
     const minCost = costRange.min ? Number(costRange.min) : null;
     const maxCost = costRange.max ? Number(costRange.max) : null;
@@ -209,7 +272,7 @@ export default function MapPage() {
         && (minCost === null || costValue >= minCost)
         && (maxCost === null || costValue <= maxCost));
 
-    return matchesType && matchesCuisine && matchesCost;
+    return matchesType && matchesCuisine && matchesLocation && matchesVegOnly && matchesCost;
   };
 
   const toggleTypeFilter = (value: string) => {
@@ -220,9 +283,15 @@ export default function MapPage() {
     setFilterCuisines((prev) => prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]);
   };
 
+  const toggleLocationFilter = (value: string) => {
+    setFilterLocations((prev) => prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]);
+  };
+
   const clearFilters = () => {
     setFilterTypes([]);
     setFilterCuisines([]);
+    setFilterLocations([]);
+    setFilterVegOnly(false);
     setCostRange({ min: '', max: '' });
   };
 
@@ -252,18 +321,7 @@ export default function MapPage() {
   };
 
   const openAddForm = () => {
-    setShowAddForm(true);
-    setAddStep(1);
-    setAddFormError(null);
-    setRestaurantPhoto('');
-    setRestaurantTypeSelection('');
-    setRestaurantCuisineSelection('');
-    setCustomRestaurantType('');
-    setCustomRestaurantCuisine('');
-    setRestaurantPhotoPosition({ x: 50, y: 50 });
-    setDishPhotos([]);
-    setShowDishBuilder(false);
-    setLatLng(null);
+    navigate('/restaurant/new');
   };
 
   const closeAddForm = () => {
@@ -281,8 +339,16 @@ export default function MapPage() {
 
   const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
 
+  const getTouchDistance = (a: React.Touch, b: React.Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+  const getTouchMidpoint = (a: React.Touch, b: React.Touch) => ({
+    x: (a.clientX + b.clientX) / 2,
+    y: (a.clientY + b.clientY) / 2
+  });
+
   const handleRestaurantPhotoPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!restaurantPhoto) return;
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     setIsDraggingRestaurantPhoto(true);
     restaurantPhotoDragRef.current = {
@@ -300,15 +366,131 @@ export default function MapPage() {
     const deltaX = event.clientX - restaurantPhotoDragRef.current.startX;
     const deltaY = event.clientY - restaurantPhotoDragRef.current.startY;
 
-    setRestaurantPhotoPosition({
+    restaurantPhotoNextPositionRef.current = {
       x: clampPercent(restaurantPhotoDragRef.current.x - (deltaX / previewWidth) * 100),
       y: clampPercent(restaurantPhotoDragRef.current.y - (deltaY / previewHeight) * 100)
-    });
+    };
+
+    if (restaurantPhotoRafRef.current === null) {
+      restaurantPhotoRafRef.current = window.requestAnimationFrame(() => {
+        setRestaurantPhotoPosition(restaurantPhotoNextPositionRef.current);
+        restaurantPhotoRafRef.current = null;
+      });
+    }
   };
 
   const handleRestaurantPhotoPointerUp = () => {
+    if (restaurantPhotoRafRef.current !== null) {
+      window.cancelAnimationFrame(restaurantPhotoRafRef.current);
+      restaurantPhotoRafRef.current = null;
+    }
+    setRestaurantPhotoPosition(restaurantPhotoNextPositionRef.current);
     restaurantPhotoDragRef.current = null;
     setIsDraggingRestaurantPhoto(false);
+  };
+
+  const handleRestaurantPhotoTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (!restaurantPhoto || !restaurantPhotoPreviewRef.current) return;
+
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      restaurantPhotoTouchRef.current = {
+        mode: 'pan',
+        startX: touch.clientX,
+        startY: touch.clientY,
+        x: restaurantPhotoPosition.x,
+        y: restaurantPhotoPosition.y,
+        startDistance: 0,
+        startZoom: restaurantPhotoZoom,
+        midpointX: 0,
+        midpointY: 0
+      };
+      setIsDraggingRestaurantPhoto(true);
+      return;
+    }
+
+    if (event.touches.length === 2) {
+      const first = event.touches[0];
+      const second = event.touches[1];
+      const midpoint = getTouchMidpoint(first, second);
+      restaurantPhotoTouchRef.current = {
+        mode: 'pinch',
+        startX: midpoint.x,
+        startY: midpoint.y,
+        x: restaurantPhotoPosition.x,
+        y: restaurantPhotoPosition.y,
+        startDistance: getTouchDistance(first, second),
+        startZoom: restaurantPhotoZoom,
+        midpointX: midpoint.x,
+        midpointY: midpoint.y
+      };
+      setIsDraggingRestaurantPhoto(true);
+    }
+  };
+
+  const handleRestaurantPhotoTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const active = restaurantPhotoTouchRef.current;
+    const preview = restaurantPhotoPreviewRef.current;
+    if (!active || !preview) return;
+
+    event.preventDefault();
+
+    const width = preview.clientWidth || 1;
+    const height = preview.clientHeight || 1;
+
+    if (active.mode === 'pan' && event.touches.length === 1) {
+      const touch = event.touches[0];
+      const deltaX = touch.clientX - active.startX;
+      const deltaY = touch.clientY - active.startY;
+      const next = {
+        x: clampPercent(active.x - (deltaX / width) * 100),
+        y: clampPercent(active.y - (deltaY / height) * 100)
+      };
+      restaurantPhotoNextPositionRef.current = next;
+      setRestaurantPhotoPosition(next);
+      return;
+    }
+
+    if (active.mode === 'pinch' && event.touches.length === 2) {
+      const first = event.touches[0];
+      const second = event.touches[1];
+      const distance = getTouchDistance(first, second);
+      const midpoint = getTouchMidpoint(first, second);
+      const zoomRatio = active.startDistance > 0 ? distance / active.startDistance : 1;
+      const nextZoom = Math.min(3, Math.max(1, active.startZoom * zoomRatio));
+      const deltaX = midpoint.x - active.midpointX;
+      const deltaY = midpoint.y - active.midpointY;
+      const next = {
+        x: clampPercent(active.x - (deltaX / width) * 100),
+        y: clampPercent(active.y - (deltaY / height) * 100)
+      };
+      restaurantPhotoNextPositionRef.current = next;
+      setRestaurantPhotoZoom(nextZoom);
+      setRestaurantPhotoPosition(next);
+    }
+  };
+
+  const handleRestaurantPhotoTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length === 0) {
+      restaurantPhotoTouchRef.current = null;
+      setIsDraggingRestaurantPhoto(false);
+      return;
+    }
+
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      restaurantPhotoTouchRef.current = {
+        mode: 'pan',
+        startX: touch.clientX,
+        startY: touch.clientY,
+        x: restaurantPhotoPosition.x,
+        y: restaurantPhotoPosition.y,
+        startDistance: 0,
+        startZoom: restaurantPhotoZoom,
+        midpointX: 0,
+        midpointY: 0
+      };
+    }
   };
 
   const buildPositionedRestaurantPhoto = async () => {
@@ -319,9 +501,10 @@ export default function MapPage() {
     await image.decode();
 
     const targetWidth = 1200;
-    const targetHeight = 675;
+    const targetHeight = 1200;
     const targetRatio = targetWidth / targetHeight;
     const imageRatio = image.naturalWidth / image.naturalHeight;
+    const safeZoom = Math.min(3, Math.max(1, restaurantPhotoZoom));
 
     let sourceX = 0;
     let sourceY = 0;
@@ -329,10 +512,14 @@ export default function MapPage() {
     let sourceHeight = image.naturalHeight;
 
     if (imageRatio > targetRatio) {
-      sourceWidth = image.naturalHeight * targetRatio;
+      sourceHeight = image.naturalHeight / safeZoom;
+      sourceWidth = sourceHeight * targetRatio;
       sourceX = (image.naturalWidth - sourceWidth) * (restaurantPhotoPosition.x / 100);
+      sourceY = (image.naturalHeight - sourceHeight) * (restaurantPhotoPosition.y / 100);
     } else {
-      sourceHeight = image.naturalWidth / targetRatio;
+      sourceWidth = image.naturalWidth / safeZoom;
+      sourceHeight = sourceWidth / targetRatio;
+      sourceX = (image.naturalWidth - sourceWidth) * (restaurantPhotoPosition.x / 100);
       sourceY = (image.naturalHeight - sourceHeight) * (restaurantPhotoPosition.y / 100);
     }
 
@@ -357,43 +544,114 @@ export default function MapPage() {
     return canvas.toDataURL('image/jpeg', 0.9);
   };
 
+  const buildPositionedDishPhoto = async (
+    imageUrl: string,
+    photoPosition: { x: number; y: number },
+    photoZoom: number
+  ) => {
+    const image = new Image();
+    image.src = imageUrl;
+    await image.decode();
+
+    const targetWidth = 1200;
+    const targetHeight = 1200;
+    const targetRatio = targetWidth / targetHeight;
+    const imageRatio = image.naturalWidth / image.naturalHeight;
+    const safeZoom = Math.min(3, Math.max(1, photoZoom));
+
+    let sourceX = 0;
+    let sourceY = 0;
+    let sourceWidth = image.naturalWidth;
+    let sourceHeight = image.naturalHeight;
+
+    if (imageRatio > targetRatio) {
+      sourceHeight = image.naturalHeight / safeZoom;
+      sourceWidth = sourceHeight * targetRatio;
+      sourceX = (image.naturalWidth - sourceWidth) * (photoPosition.x / 100);
+      sourceY = (image.naturalHeight - sourceHeight) * (photoPosition.y / 100);
+    } else {
+      sourceWidth = image.naturalWidth / safeZoom;
+      sourceHeight = sourceWidth / targetRatio;
+      sourceX = (image.naturalWidth - sourceWidth) * (photoPosition.x / 100);
+      sourceY = (image.naturalHeight - sourceHeight) * (photoPosition.y / 100);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const context = canvas.getContext('2d');
+    if (!context) return imageUrl;
+
+    context.drawImage(
+      image,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      targetWidth,
+      targetHeight
+    );
+
+    return canvas.toDataURL('image/jpeg', 0.9);
+  };
+
   const handleRestaurantPhotoUpload = async (file: File | null) => {
     if (!file) return;
     const dataUrl = await fileToDataUrl(file);
     setRestaurantPhoto(dataUrl);
     setRestaurantPhotoPosition({ x: 50, y: 50 });
+    setRestaurantPhotoZoom(1);
+    restaurantPhotoNextPositionRef.current = { x: 50, y: 50 };
+    if (restaurantPhotoInputRef.current) {
+      restaurantPhotoInputRef.current.value = '';
+    }
     setAddFormError(null);
   };
 
   const handleDishPhotoUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const urls = await Promise.all(Array.from(files).map(fileToDataUrl));
+    const today = new Date().toISOString().slice(0, 10);
     setDishPhotos((prev) => [
       ...prev,
       ...urls.map((url) => ({
         id: createId(),
         imageUrl: url,
+        photoPosition: { x: 50, y: 50 },
+        photoZoom: 1,
         name: '',
         rating: 5,
         priceLevel: 2,
+        actualPrice: '',
         review: '',
+        reviewDate: today,
         cuisine: '',
         flavorTags: [],
         isCustomCuisine: false
       }))
     ]);
+    if (dishPhotoInputRef.current) {
+      dishPhotoInputRef.current.value = '';
+    }
   };
 
   const addEmptyDishCard = () => {
+    const today = new Date().toISOString().slice(0, 10);
     setDishPhotos((prev) => [
       ...prev,
       {
         id: createId(),
         imageUrl: '',
+        photoPosition: { x: 50, y: 50 },
+        photoZoom: 1,
         name: '',
         rating: 5,
         priceLevel: 2,
+        actualPrice: '',
         review: '',
+        reviewDate: today,
         cuisine: '',
         flavorTags: [],
         isCustomCuisine: false
@@ -407,6 +665,177 @@ export default function MapPage() {
 
   const removeDishCard = (id: string) => {
     setDishPhotos((prev) => prev.filter((dish) => dish.id !== id));
+  };
+
+  const handleDishPhotoPointerDown = (id: string, event: React.PointerEvent<HTMLDivElement>) => {
+    const dish = dishPhotos.find((item) => item.id === id);
+    if (!dish || !dish.imageUrl) return;
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggingDishPhotoId(id);
+
+    dishPhotoDragRef.current = {
+      id,
+      startX: event.clientX,
+      startY: event.clientY,
+      x: dish.photoPosition.x,
+      y: dish.photoPosition.y,
+      width: event.currentTarget.clientWidth || 1,
+      height: event.currentTarget.clientHeight || 1
+    };
+  };
+
+  const handleDishPhotoPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dishPhotoDragRef.current) return;
+
+    const drag = dishPhotoDragRef.current;
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    const next = {
+      id: drag.id,
+      x: clampPercent(drag.x - (deltaX / drag.width) * 100),
+      y: clampPercent(drag.y - (deltaY / drag.height) * 100)
+    };
+
+    dishPhotoNextPositionRef.current = next;
+
+    if (dishPhotoRafRef.current === null) {
+      dishPhotoRafRef.current = window.requestAnimationFrame(() => {
+        if (!dishPhotoNextPositionRef.current) return;
+        const current = dishPhotoNextPositionRef.current;
+        updateDishCard(current.id, { photoPosition: { x: current.x, y: current.y } });
+        dishPhotoRafRef.current = null;
+      });
+    }
+  };
+
+  const handleDishPhotoPointerUp = () => {
+    if (dishPhotoRafRef.current !== null) {
+      window.cancelAnimationFrame(dishPhotoRafRef.current);
+      dishPhotoRafRef.current = null;
+    }
+
+    if (dishPhotoNextPositionRef.current) {
+      const current = dishPhotoNextPositionRef.current;
+      updateDishCard(current.id, { photoPosition: { x: current.x, y: current.y } });
+    }
+
+    dishPhotoDragRef.current = null;
+    dishPhotoNextPositionRef.current = null;
+    setDraggingDishPhotoId(null);
+  };
+
+  const handleDishPhotoTouchStart = (id: string, event: React.TouchEvent<HTMLDivElement>) => {
+    const dish = dishPhotos.find((item) => item.id === id);
+    if (!dish || !dish.imageUrl) return;
+
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      dishPhotoTouchRef.current = {
+        id,
+        mode: 'pan',
+        startX: touch.clientX,
+        startY: touch.clientY,
+        x: dish.photoPosition.x,
+        y: dish.photoPosition.y,
+        startDistance: 0,
+        startZoom: dish.photoZoom,
+        midpointX: 0,
+        midpointY: 0
+      };
+      setDraggingDishPhotoId(id);
+      return;
+    }
+
+    if (event.touches.length === 2) {
+      const first = event.touches[0];
+      const second = event.touches[1];
+      const midpoint = getTouchMidpoint(first, second);
+      dishPhotoTouchRef.current = {
+        id,
+        mode: 'pinch',
+        startX: midpoint.x,
+        startY: midpoint.y,
+        x: dish.photoPosition.x,
+        y: dish.photoPosition.y,
+        startDistance: getTouchDistance(first, second),
+        startZoom: dish.photoZoom,
+        midpointX: midpoint.x,
+        midpointY: midpoint.y
+      };
+      setDraggingDishPhotoId(id);
+    }
+  };
+
+  const handleDishPhotoTouchMove = (id: string, event: React.TouchEvent<HTMLDivElement>) => {
+    const active = dishPhotoTouchRef.current;
+    if (!active || active.id !== id) return;
+
+    event.preventDefault();
+
+    const previewWidth = event.currentTarget.clientWidth || 1;
+    const previewHeight = event.currentTarget.clientHeight || 1;
+
+    if (active.mode === 'pan' && event.touches.length === 1) {
+      const touch = event.touches[0];
+      const deltaX = touch.clientX - active.startX;
+      const deltaY = touch.clientY - active.startY;
+      updateDishCard(id, {
+        photoPosition: {
+          x: clampPercent(active.x - (deltaX / previewWidth) * 100),
+          y: clampPercent(active.y - (deltaY / previewHeight) * 100)
+        }
+      });
+      return;
+    }
+
+    if (active.mode === 'pinch' && event.touches.length === 2) {
+      const first = event.touches[0];
+      const second = event.touches[1];
+      const distance = getTouchDistance(first, second);
+      const midpoint = getTouchMidpoint(first, second);
+      const zoomRatio = active.startDistance > 0 ? distance / active.startDistance : 1;
+      const nextZoom = Math.min(3, Math.max(1, active.startZoom * zoomRatio));
+      const deltaX = midpoint.x - active.midpointX;
+      const deltaY = midpoint.y - active.midpointY;
+      updateDishCard(id, {
+        photoZoom: nextZoom,
+        photoPosition: {
+          x: clampPercent(active.x - (deltaX / previewWidth) * 100),
+          y: clampPercent(active.y - (deltaY / previewHeight) * 100)
+        }
+      });
+    }
+  };
+
+  const handleDishPhotoTouchEnd = (id: string, event: React.TouchEvent<HTMLDivElement>) => {
+    const active = dishPhotoTouchRef.current;
+    if (!active || active.id !== id) return;
+
+    if (event.touches.length === 0) {
+      dishPhotoTouchRef.current = null;
+      setDraggingDishPhotoId(null);
+      return;
+    }
+
+    if (event.touches.length === 1) {
+      const dish = dishPhotos.find((item) => item.id === id);
+      if (!dish) return;
+      const touch = event.touches[0];
+      dishPhotoTouchRef.current = {
+        id,
+        mode: 'pan',
+        startX: touch.clientX,
+        startY: touch.clientY,
+        x: dish.photoPosition.x,
+        y: dish.photoPosition.y,
+        startDistance: 0,
+        startZoom: dish.photoZoom,
+        midpointX: 0,
+        midpointY: 0
+      };
+    }
   };
 
   const getRatingColor = (rating?: number) => {
@@ -425,15 +854,38 @@ export default function MapPage() {
   const activeRest = restaurants.find(r => r.id === selectedRest);
   const filteredRestaurants = useMemo(
     () => restaurants.filter(matchesFilters),
-    [restaurants, filterTypes, filterCuisines, costRange]
+    [restaurants, filterTypes, filterCuisines, filterLocations, filterVegOnly, costRange]
   );
+
+  const distanceScore = (a: Restaurant, b: Restaurant) => {
+    const lat = a.lat - b.lat;
+    const lng = a.lng - b.lng;
+    return (lat * lat) + (lng * lng);
+  };
+
   const displayRestaurants = useMemo(() => {
-    if (!selectedRest) return filteredRestaurants;
-    if (filteredRestaurants.some((rest) => rest.id === selectedRest)) {
-      return filteredRestaurants;
-    }
+    if (!selectedRest) return [];
     const selected = restaurants.find((rest) => rest.id === selectedRest);
-    return selected ? [selected, ...filteredRestaurants] : filteredRestaurants;
+    if (!selected) return [];
+
+    const pool = filteredRestaurants.some((rest) => rest.id === selected.id)
+      ? filteredRestaurants
+      : [selected, ...filteredRestaurants];
+
+    const sortedByDistance = pool
+      .map((rest) => ({ rest, score: distanceScore(rest, selected) }))
+      .sort((a, b) => a.score - b.score)
+      .slice(0, 5)
+      .map((item) => item.rest);
+
+    const selectedCard = sortedByDistance.find((rest) => rest.id === selected.id);
+    if (!selectedCard) return sortedByDistance;
+
+    const others = sortedByDistance.filter((rest) => rest.id !== selected.id);
+    const leftCards = others.slice(0, 2);
+    const rightCards = others.slice(2, 4);
+
+    return [...leftCards, selectedCard, ...rightCards];
   }, [filteredRestaurants, restaurants, selectedRest]);
 
   const setCardRef = (id: string) => (node: HTMLDivElement | null) => {
@@ -454,6 +906,7 @@ export default function MapPage() {
 
   const handleAddSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (isApiBusy) return;
     const data = new FormData(e.currentTarget);
     const name = data.get('name') as string;
     const notes = data.get('notes') as string;
@@ -461,6 +914,8 @@ export default function MapPage() {
     const selectedCuisine = restaurantCuisineSelection === '__custom__' ? customRestaurantCuisine : restaurantCuisineSelection;
     const type = selectedType.trim();
     const cuisine = selectedCuisine.trim();
+    const locationName = String(data.get('locationName') ?? '').trim().split(/\s+/).filter(Boolean)[0] ?? '';
+    const address = String(data.get('address') ?? '').trim();
     const costForTwoInput = data.get('costForTwo') as string;
     const costForTwo = costForTwoInput ? Number(costForTwoInput) : undefined;
 
@@ -469,7 +924,20 @@ export default function MapPage() {
       return;
     }
 
+    const invalidDish = dishPhotos.find((dish) => {
+      const hasAnyContent = Boolean(
+        dish.name.trim() || dish.review.trim() || dish.imageUrl || dish.cuisine.trim() || dish.actualPrice.trim() || dish.flavorTags.length > 0
+      );
+      if (!hasAnyContent) return false;
+      return !dish.name.trim() || !dish.review.trim();
+    });
+    if (invalidDish) {
+      setAddFormError('For each dish card you fill, name and description are required.');
+      return;
+    }
+
     try {
+      setIsSavingRestaurant(true);
       setAddFormError(null);
       const restaurantId = createId();
       const resolvedLatLng = latLng
@@ -486,6 +954,8 @@ export default function MapPage() {
       await addRestaurant({
         id: restaurantId,
         name,
+        locationName: locationName || undefined,
+        address: address || undefined,
         notes,
         imageUrl: positionedRestaurantPhoto || restaurantPhoto || undefined,
         type: type || undefined,
@@ -498,6 +968,12 @@ export default function MapPage() {
       for (const dish of dishPhotos) {
         if (!dish.name.trim()) continue;
         const tags = dish.flavorTags.filter(Boolean);
+        const parsedActualPrice = dish.actualPrice ? Number(dish.actualPrice) : Number.NaN;
+        const reviewText = dish.review.trim();
+        const reviewDate = dish.reviewDate || new Date().toISOString().slice(0, 10);
+        const positionedDishPhoto = dish.imageUrl
+          ? await buildPositionedDishPhoto(dish.imageUrl, dish.photoPosition, dish.photoZoom)
+          : undefined;
         if (dish.cuisine) {
           await ensureCuisine(dish.cuisine);
         }
@@ -509,11 +985,14 @@ export default function MapPage() {
           restaurantId,
           name: dish.name,
           rating: Math.min(5, Math.max(1, dish.rating)),
-          priceLevel: Math.min(4, Math.max(1, dish.priceLevel)) as 1 | 2 | 3 | 4,
-          review: dish.review,
+          priceLevel: Math.min(3, Math.max(1, dish.priceLevel)) as 1 | 2 | 3,
+          actualPrice: Number.isFinite(parsedActualPrice) ? parsedActualPrice : undefined,
+          review: reviewText || undefined,
+          reviewDate: reviewDate,
+          reviews: [{ id: createId(), text: reviewText, date: reviewDate, createdAt: Date.now() }],
           cuisine: dish.cuisine || undefined,
           flavorTags: tags.length > 0 ? tags : undefined,
-          imageUrl: dish.imageUrl || undefined
+          imageUrl: positionedDishPhoto || dish.imageUrl || undefined
         });
       }
 
@@ -522,6 +1001,8 @@ export default function MapPage() {
       setSelectedRest(restaurantId);
     } catch (error) {
       setAddFormError(error instanceof Error ? error.message : 'Could not save restaurant.');
+    } finally {
+      setIsSavingRestaurant(false);
     }
   };
 
@@ -545,6 +1026,14 @@ export default function MapPage() {
       if (scrollTimeoutRef.current !== null) {
         window.clearTimeout(scrollTimeoutRef.current);
       }
+      if (restaurantPhotoRafRef.current !== null) {
+        window.cancelAnimationFrame(restaurantPhotoRafRef.current);
+      }
+      if (dishPhotoRafRef.current !== null) {
+        window.cancelAnimationFrame(dishPhotoRafRef.current);
+      }
+      restaurantPhotoTouchRef.current = null;
+      dishPhotoTouchRef.current = null;
     };
   }, []);
 
@@ -606,6 +1095,16 @@ export default function MapPage() {
       label: cuisine,
       onRemove: () => toggleCuisineFilter(cuisine)
     })),
+    ...filterLocations.map((location) => ({
+      key: `location:${location}`,
+      label: location,
+      onRemove: () => toggleLocationFilter(location)
+    })),
+    ...(filterVegOnly ? [{
+      key: 'vegOnly',
+      label: 'Veg only',
+      onRemove: () => setFilterVegOnly(false)
+    }] : []),
     ...(costRange.min || costRange.max ? [{
       key: 'cost',
       label: `₹${costRange.min || '0'} - ₹${costRange.max || 'max'}`,
@@ -618,7 +1117,8 @@ export default function MapPage() {
       <div className="absolute top-4 right-4 z-[1000]">
         <button
           onClick={() => setShowFilters(true)}
-          className="bg-white/95 backdrop-blur border border-gray-200 rounded-full shadow-lg p-3 text-gray-700 hover:text-black"
+          disabled={isApiBusy}
+          className="bg-white/95 backdrop-blur border border-gray-200 rounded-full shadow-lg p-3 text-gray-700 hover:text-black disabled:opacity-60 disabled:cursor-not-allowed"
           aria-label="Open filters"
         >
           <SlidersHorizontal size={18} />
@@ -627,15 +1127,17 @@ export default function MapPage() {
 
       {selectedFilters.length > 0 && (
         <div className="absolute top-16 right-4 z-[1000] max-w-[70vw]">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col items-end gap-2">
             {selectedFilters.map((filter) => (
               <button
                 key={filter.key}
                 type="button"
+                disabled={isApiBusy}
                 onClick={filter.onRemove}
-                className="px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-900 text-white hover:bg-black"
+                className="px-2.5 py-1 rounded-full text-xs font-semibold bg-white/70 backdrop-blur border border-white/70 text-gray-800 hover:bg-white/90 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1"
               >
                 {filter.label}
+                <X size={12} />
               </button>
             ))}
           </div>
@@ -659,7 +1161,8 @@ export default function MapPage() {
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 20, opacity: 0 }}
-              className="absolute top-16 left-1/2 -translate-x-1/2 w-[min(94%,520px)] bg-white rounded-2xl shadow-2xl border border-gray-200 p-4"
+              className="absolute top-16 left-1/2 -translate-x-1/2 w-[min(94%,520px)] max-h-[78dvh] overflow-y-auto overscroll-contain [touch-action:pan-y] bg-white/88 backdrop-blur rounded-2xl shadow-2xl border border-white/70 p-4"
+              style={{ WebkitOverflowScrolling: 'touch' }}
             >
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
@@ -667,86 +1170,119 @@ export default function MapPage() {
                   <button onClick={clearFilters} className="p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200" aria-label="Clear filters">
                     <RotateCcw size={16} />
                   </button>
-                  <button onClick={() => setShowFilters(false)} className="p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200" aria-label="Close">
+                  <button disabled={isApiBusy} onClick={() => setShowFilters(false)} className="p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed" aria-label="Close">
                     <X size={16} />
                   </button>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-4">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-gray-500 mb-2">Type</label>
-                    <div className="flex flex-wrap gap-2">
-                      {typeOptions.map((type) => {
-                        const isActive = filterTypes.includes(type);
-                        return (
-                          <button
-                            key={type}
-                            type="button"
-                            onClick={() => toggleTypeFilter(type)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${isActive ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}
-                          >
-                            {type}
-                          </button>
-                        );
-                      })}
-                    </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 mb-2">Type</label>
+                  <div className="flex flex-wrap gap-2">
+                    {typeOptions.map((type) => {
+                      const isActive = filterTypes.includes(type);
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          disabled={isApiBusy}
+                          onClick={() => toggleTypeFilter(type)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition disabled:opacity-60 disabled:cursor-not-allowed ${isActive ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}
+                        >
+                          {type}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-gray-500 mb-2">Cuisine</label>
-                    <div className="flex flex-wrap gap-2">
-                      {cuisineOptions.map((cuisine) => {
-                        const isActive = filterCuisines.includes(cuisine);
-                        return (
-                          <button
-                            key={cuisine}
-                            type="button"
-                            onClick={() => toggleCuisineFilter(cuisine)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${isActive ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}
-                          >
-                            {cuisine}
-                          </button>
-                        );
-                      })}
-                    </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 mb-2">Cuisine</label>
+                  <div className="flex flex-wrap gap-2">
+                    {cuisineOptions.map((cuisine) => {
+                      const isActive = filterCuisines.includes(cuisine);
+                      return (
+                        <button
+                          key={cuisine}
+                          type="button"
+                          disabled={isApiBusy}
+                          onClick={() => toggleCuisineFilter(cuisine)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition disabled:opacity-60 disabled:cursor-not-allowed ${isActive ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}
+                        >
+                          {cuisine}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-gray-500 mb-2">Cost for two (₹)</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="0"
-                        value={costRange.min}
-                        onChange={(e) => setCostRange((prev) => ({ ...prev, min: e.target.value }))}
-                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:outline-none"
-                        placeholder={costOptions.length > 0 ? `Min ${costOptions[0]}` : 'Min'}
-                      />
-                      <span className="text-gray-400">-</span>
-                      <input
-                        type="number"
-                        min="0"
-                        value={costRange.max}
-                        onChange={(e) => setCostRange((prev) => ({ ...prev, max: e.target.value }))}
-                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:outline-none"
-                        placeholder={costOptions.length > 0 ? `Max ${costOptions[costOptions.length - 1]}` : 'Max'}
-                      />
-                    </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 mb-2">Location</label>
+                  <div className="flex flex-wrap gap-2">
+                    {locationOptions.map((location) => {
+                      const isActive = filterLocations.includes(location);
+                      return (
+                        <button
+                          key={location}
+                          type="button"
+                          disabled={isApiBusy}
+                          onClick={() => toggleLocationFilter(location)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition disabled:opacity-60 disabled:cursor-not-allowed ${isActive ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}
+                        >
+                          {location}
+                        </button>
+                      );
+                    })}
                   </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 mb-2">Cost for two (₹)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      disabled={isApiBusy}
+                      value={costRange.min}
+                      onChange={(e) => setCostRange((prev) => ({ ...prev, min: e.target.value }))}
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+                      placeholder={costOptions.length > 0 ? `Min ${costOptions[0]}` : 'Min'}
+                    />
+                    <span className="text-gray-400">-</span>
+                    <input
+                      type="number"
+                      min="0"
+                      disabled={isApiBusy}
+                      value={costRange.max}
+                      onChange={(e) => setCostRange((prev) => ({ ...prev, max: e.target.value }))}
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+                      placeholder={costOptions.length > 0 ? `Max ${costOptions[costOptions.length - 1]}` : 'Max'}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={filterVegOnly}
+                      onChange={(event) => setFilterVegOnly(event.target.checked)}
+                    />
+                    Veg only
+                  </label>
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-gray-500 mb-2">Selected</label>
                   {selectedFilters.length === 0 ? (
                     <p className="text-xs text-gray-400">No filters applied</p>
                   ) : (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-col items-start gap-2">
                       {selectedFilters.map((filter) => (
                         <button
                           key={filter.key}
                           type="button"
+                          disabled={isApiBusy}
                           onClick={filter.onRemove}
-                          className="px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-900 text-white hover:bg-black"
+                          className="px-2.5 py-1 rounded-full text-xs font-semibold bg-white/75 backdrop-blur border border-white/70 text-gray-800 hover:bg-white/90 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1"
                         >
                           {filter.label}
+                          <X size={12} />
                         </button>
                       ))}
                     </div>
@@ -794,7 +1330,7 @@ export default function MapPage() {
             <div
               ref={cardContainerRef}
               onScroll={handleCardScroll}
-              className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-2 h-full"
+              className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 h-full px-[12vw]"
             >
               {displayRestaurants.map((rest) => {
                 const rating = ratingsByRestaurant.get(rest.id);
@@ -803,12 +1339,19 @@ export default function MapPage() {
                   <div
                     key={rest.id}
                     ref={setCardRef(rest.id)}
-                    className={`snap-center min-w-[200px] max-w-[220px] bg-white rounded-2xl shadow-lg border overflow-hidden transition h-full ${isSelected ? 'border-black' : 'border-gray-200'}`}
+                    className={`snap-center w-[76vw] max-w-[320px] min-w-[260px] flex-none bg-white rounded-2xl shadow-lg border overflow-hidden transition h-full ${isSelected ? 'border-black' : 'border-gray-200'}`}
                   >
-                    <button
-                      type="button"
+                    <div
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setSelectedRest(rest.id)}
-                      className="w-full h-full text-left flex flex-col"
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedRest(rest.id);
+                        }
+                      }}
+                      className="w-full h-full text-left flex flex-col cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
                     >
                       <div className="relative h-full">
                         {rest.imageUrl ? (
@@ -826,6 +1369,7 @@ export default function MapPage() {
                                 {rating ? rating.toFixed(1) : '--'}
                               </span>
                               <span>{rest.cuisine ?? rest.type ?? 'Restaurant'}</span>
+                              {rest.locationName && <span>• {rest.locationName}</span>}
                             </div>
                             <div className="text-[11px] text-white/80">
                               {rest.costForTwo ? `₹${rest.costForTwo} for two` : 'Cost unknown'}
@@ -844,7 +1388,7 @@ export default function MapPage() {
                           </button>
                         </div>
                       </div>
-                    </button>
+                    </div>
                   </div>
                 );
               })}
@@ -857,8 +1401,9 @@ export default function MapPage() {
       {editMode && !showAddForm && (
         <button 
           onClick={openAddForm}
-          className="absolute right-6 z-[1000] bg-red-500 hover:bg-red-600 text-white rounded-full p-4 shadow-xl active:scale-95 transition-transform"
-          style={{ bottom: 'calc(28vh + 16px)' }}
+          disabled={isApiBusy}
+          className="absolute right-6 z-[1000] bg-red-500 hover:bg-red-600 text-white rounded-full p-4 shadow-xl active:scale-95 transition-transform disabled:opacity-60 disabled:cursor-not-allowed"
+          style={{ bottom: displayRestaurants.length > 0 ? 'calc(28vh + 16px)' : 'calc(16px + env(safe-area-inset-bottom))' }}
         >
           <Plus size={24} />
         </button>
@@ -879,10 +1424,11 @@ export default function MapPage() {
           >
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold">Add Restaurant</h2>
-              <button onClick={closeAddForm} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><X size={20} /></button>
+              <button disabled={isApiBusy} onClick={closeAddForm} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"><X size={20} /></button>
             </div>
             
             <form onSubmit={handleAddSubmit} onFocusCapture={handleFormFocusCapture} className="space-y-4 pb-24">
+              <fieldset disabled={isApiBusy} className="space-y-4 disabled:opacity-70">
               <div className={addStep === 1 ? '' : 'hidden'}>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Upload Restaurant Photo</label>
                 <input
@@ -895,28 +1441,49 @@ export default function MapPage() {
                 <button
                   type="button"
                   onClick={() => restaurantPhotoInputRef.current?.click()}
-                  className="w-full bg-black text-white font-medium py-2.5 rounded-xl hover:bg-gray-800"
+                  disabled={isApiBusy}
+                  className="w-full bg-black text-white font-medium py-2.5 rounded-xl hover:bg-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   Upload photo
                 </button>
                 {restaurantPhoto && (
                   <div
                     ref={restaurantPhotoPreviewRef}
-                    className={`mt-3 rounded-xl overflow-hidden h-44 relative ${isDraggingRestaurantPhoto ? 'cursor-grabbing' : 'cursor-grab'}`}
+                    className={`mt-3 rounded-xl overflow-hidden aspect-square relative [touch-action:none] ${isDraggingRestaurantPhoto ? 'cursor-grabbing' : 'cursor-grab'}`}
                     onPointerDown={handleRestaurantPhotoPointerDown}
                     onPointerMove={handleRestaurantPhotoPointerMove}
                     onPointerUp={handleRestaurantPhotoPointerUp}
                     onPointerCancel={handleRestaurantPhotoPointerUp}
+                    onTouchStart={handleRestaurantPhotoTouchStart}
+                    onTouchMove={handleRestaurantPhotoTouchMove}
+                    onTouchEnd={handleRestaurantPhotoTouchEnd}
                   >
                     <img
                       src={restaurantPhoto}
                       alt="Restaurant preview"
                       className="w-full h-full object-cover pointer-events-none select-none"
-                      style={{ objectPosition: `${restaurantPhotoPosition.x}% ${restaurantPhotoPosition.y}%` }}
+                      style={{ objectPosition: `${restaurantPhotoPosition.x}% ${restaurantPhotoPosition.y}%`, transform: `scale(${restaurantPhotoZoom})` }}
                       draggable={false}
                     />
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setRestaurantPhoto('');
+                        setRestaurantPhotoPosition({ x: 50, y: 50 });
+                        setRestaurantPhotoZoom(1);
+                        restaurantPhotoNextPositionRef.current = { x: 50, y: 50 };
+                        if (restaurantPhotoInputRef.current) {
+                          restaurantPhotoInputRef.current.value = '';
+                        }
+                      }}
+                      className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1"
+                      aria-label="Remove restaurant photo"
+                    >
+                      <X size={14} />
+                    </button>
                     <div className="absolute left-2 right-2 bottom-2 text-[11px] bg-black/60 text-white px-2 py-1 rounded-md text-center">
-                      Drag photo to set framing
+                      Drag to pan, pinch to zoom
                     </div>
                   </div>
                 )}
@@ -970,13 +1537,32 @@ export default function MapPage() {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Location Name</label>
+                      <input
+                        name="locationName"
+                        className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                        placeholder="Fort"
+                      />
+                      <p className="mt-1 text-xs text-gray-500">One word area name, used in filters.</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                      <input
+                        name="address"
+                        className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                        placeholder="Street and landmark"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
                       <select
                         value={restaurantTypeSelection}
                         onChange={(event) => setRestaurantTypeSelection(event.target.value)}
                         className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
                       >
-                        <option value="">Select type (optional)</option>
+                        <option value="">Select type</option>
                         {typeOptions.map((option) => (
                           <option key={option} value={option}>{option}</option>
                         ))}
@@ -998,7 +1584,7 @@ export default function MapPage() {
                         onChange={(event) => setRestaurantCuisineSelection(event.target.value)}
                         className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
                       >
-                        <option value="">Select cuisine (optional)</option>
+                        <option value="">Select cuisine</option>
                         {cuisineOptions.map((option) => (
                           <option key={option} value={option}>{option}</option>
                         ))}
@@ -1025,7 +1611,7 @@ export default function MapPage() {
                       onClick={() => setShowDishBuilder((prev) => !prev)}
                       className="text-sm font-semibold text-gray-700"
                     >
-                      {showDishBuilder ? 'Hide dish editor' : 'Add dishes now (optional)'}
+                      {showDishBuilder ? 'Hide dish editor' : 'Add dishes now'}
                     </button>
 
                     {showDishBuilder && (
@@ -1051,9 +1637,12 @@ export default function MapPage() {
                         <button
                           type="button"
                           onClick={() => dishPhotoInputRef.current?.click()}
-                          className="w-full bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200"
+                          disabled={isApiBusy}
+                          aria-label="Upload dish photos"
+                          title="Upload dish photos"
+                          className="h-11 w-11 rounded-full border border-gray-200 bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                          Upload dish photos
+                          <ImagePlus size={18} />
                         </button>
 
                         {dishPhotos.length === 0 ? (
@@ -1063,7 +1652,42 @@ export default function MapPage() {
                             {dishPhotos.map((dish) => (
                               <div key={dish.id} className="border border-gray-200 rounded-xl p-3 space-y-3">
                                 {dish.imageUrl && (
-                                  <img src={dish.imageUrl} alt="Dish" className="w-full h-28 object-cover rounded-lg" />
+                                  <div
+                                    className={`w-full rounded-lg overflow-hidden aspect-square relative [touch-action:none] ${draggingDishPhotoId === dish.id ? 'cursor-grabbing' : 'cursor-grab'}`}
+                                    onPointerDown={(event) => handleDishPhotoPointerDown(dish.id, event)}
+                                    onPointerMove={handleDishPhotoPointerMove}
+                                    onPointerUp={handleDishPhotoPointerUp}
+                                    onPointerCancel={handleDishPhotoPointerUp}
+                                    onTouchStart={(event) => handleDishPhotoTouchStart(dish.id, event)}
+                                    onTouchMove={(event) => handleDishPhotoTouchMove(dish.id, event)}
+                                    onTouchEnd={(event) => handleDishPhotoTouchEnd(dish.id, event)}
+                                  >
+                                    <img
+                                      src={dish.imageUrl}
+                                      alt="Dish"
+                                      className="w-full h-full object-cover pointer-events-none select-none"
+                                      style={{ objectPosition: `${dish.photoPosition.x}% ${dish.photoPosition.y}%`, transform: `scale(${dish.photoZoom})` }}
+                                      draggable={false}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        updateDishCard(dish.id, {
+                                          imageUrl: '',
+                                          photoPosition: { x: 50, y: 50 },
+                                          photoZoom: 1
+                                        });
+                                      }}
+                                      className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1"
+                                      aria-label="Remove dish photo"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                    <div className="absolute left-2 right-2 bottom-2 text-[10px] bg-black/60 text-white px-2 py-1 rounded text-center">
+                                      Drag to pan, pinch to zoom
+                                    </div>
+                                  </div>
                                 )}
                                 <div>
                                   <label className="block text-sm font-medium text-gray-700 mb-1">Dish Name</label>
@@ -1074,29 +1698,42 @@ export default function MapPage() {
                                     placeholder="Dish name"
                                   />
                                 </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Rating</label>
-                                    <input
-                                      type="number"
-                                      min="1"
-                                      max="5"
-                                      value={dish.rating}
-                                      onChange={(e) => updateDishCard(dish.id, { rating: Number(e.target.value) })}
-                                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Price Level</label>
-                                    <input
-                                      type="number"
-                                      min="1"
-                                      max="4"
-                                      value={dish.priceLevel}
-                                      onChange={(e) => updateDishCard(dish.id, { priceLevel: Number(e.target.value) })}
-                                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                                    />
-                                  </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">Rating</label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="5"
+                                    value={dish.rating}
+                                    onChange={(e) => updateDishCard(dish.id, { rating: Number(e.target.value) })}
+                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">Actual Price (₹)</label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={dish.actualPrice}
+                                    onChange={(e) => updateDishCard(dish.id, { actualPrice: e.target.value })}
+                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                                    placeholder="250"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">Price Icons</label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="3"
+                                    value={dish.priceLevel}
+                                    onChange={(e) => updateDishCard(dish.id, { priceLevel: Number(e.target.value) })}
+                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                                  />
+                                  <p className="mt-1 text-xs text-gray-500 inline-flex items-center gap-1">
+                                    Preview:
+                                    <PriceLevelIcon level={Math.min(3, Math.max(1, dish.priceLevel))} />
+                                  </p>
                                 </div>
                                 <div>
                                   <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
@@ -1106,6 +1743,15 @@ export default function MapPage() {
                                     rows={2}
                                     className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
                                     placeholder="Short description"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">Review Date</label>
+                                  <input
+                                    type="date"
+                                    value={dish.reviewDate}
+                                    onChange={(e) => updateDishCard(dish.id, { reviewDate: e.target.value })}
+                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
                                   />
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1122,7 +1768,7 @@ export default function MapPage() {
                                       }}
                                       className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
                                     >
-                                      <option value="">Select cuisine (optional)</option>
+                                      <option value="">Select cuisine</option>
                                       {cuisineOptions.map((option) => (
                                         <option key={option} value={option}>{option}</option>
                                       ))}
@@ -1164,6 +1810,7 @@ export default function MapPage() {
                   </div>
                 </div>
               </div>
+              </fieldset>
 
               {addFormError && (
                 <p className="text-sm text-red-600 font-medium">{addFormError}</p>
@@ -1172,25 +1819,29 @@ export default function MapPage() {
               <div className="sticky bottom-0 bg-white/95 backdrop-blur flex items-center justify-between gap-3 pt-2">
                 <button
                   type="button"
+                  disabled={isApiBusy}
                   onClick={() => setAddStep((prev) => Math.max(1, prev - 1))}
-                  className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 font-medium hover:bg-gray-200"
+                  className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   Back
                 </button>
                 {addStep < 3 ? (
                   <button
                     type="button"
+                    disabled={isApiBusy}
                     onClick={() => setAddStep((prev) => Math.min(3, prev + 1))}
-                    className="flex-[2] py-2.5 rounded-xl bg-black text-white font-medium hover:bg-gray-800"
+                    className="flex-[2] py-2.5 rounded-xl bg-black text-white font-medium hover:bg-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     Next
                   </button>
                 ) : (
                   <button
                     type="submit"
-                    className="flex-[2] py-2.5 rounded-xl bg-red-500 text-white font-medium hover:bg-red-600"
+                    disabled={isApiBusy}
+                    className="flex-[2] py-2.5 rounded-xl bg-red-500 text-white font-medium hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
-                    Save Restaurant
+                    {isSavingRestaurant ? <Loader2 size={16} className="animate-spin" /> : null}
+                    {isSavingRestaurant ? 'Saving...' : 'Save Restaurant'}
                   </button>
                 )}
               </div>
@@ -1199,6 +1850,14 @@ export default function MapPage() {
         )}
 
       </AnimatePresence>
+
+      {isApiBusy && (
+        <div className="fixed inset-0 z-[1200] bg-black/10 pointer-events-auto">
+          <div className="absolute top-4 right-4 bg-white rounded-full p-2 shadow">
+            <Loader2 size={16} className="animate-spin text-gray-700" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
