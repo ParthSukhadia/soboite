@@ -86,18 +86,7 @@ const clearTableByIds = async (tableName: string, idColumn: string = 'id') => {
 function SoboiteIcon() {
   return (
     <span className="soboite-logo" aria-hidden="true">
-      <svg viewBox="0 0 64 64" role="img" focusable="false">
-        <defs>
-          <linearGradient id="soboiteGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#16a34a" />
-            <stop offset="100%" stopColor="#14532d" />
-          </linearGradient>
-        </defs>
-        <path d="M32 8c-9.5 0-17 7.5-17 17 0 12 13.8 24.5 15.3 25.8a2.7 2.7 0 0 0 3.4 0C35.2 49.5 49 37 49 25c0-9.5-7.5-17-17-17z" fill="url(#soboiteGrad)" />
-        <path d="M25 25c0-4.4 3.6-8 8-8h0c0 4.4-3.6 8-8 8z" fill="#dcfce7" />
-        <path d="M23 40c6.5-2 12.5-2 18 0" stroke="#bbf7d0" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-        <circle cx="32" cy="25" r="2.1" fill="#052e16" />
-      </svg>
+      <img src="/soboite-icon.svg" alt="" />
     </span>
   );
 }

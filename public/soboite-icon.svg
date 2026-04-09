@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Soboite icon">
+  <defs>
+    <linearGradient id="soboitePin" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4ade80" />
+      <stop offset="100%" stop-color="#166534" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.15" />
+    </filter>
+  </defs>
+  <!-- Outer leaf-pin shape -->
+  <path d="M32 4c-12 0-21 9-21 20 0 13 18.5 31.5 19.5 32.5a2.1 2.1 0 0 0 3 0C34.5 55.5 53 37 53 24 53 13 44 4 32 4z" fill="url(#soboitePin)" filter="url(#shadow)" />
+  <!-- Inner leaf cutout -->
+  <path d="M32 10c-7.7 0-14 6.3-14 14 0 9 12.5 21.5 13.5 22.5.3.3.7.3 1 0C33.5 45.5 46 33 46 24c0-7.7-6.3-14-14-14z" fill="#ffffff" />
+  <!-- Vein/stem inside the cutout -->
+  <path d="M32 16v24" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" />
+  <path d="M25 24c3 3 6 4 7 4" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" fill="none" />
+  <path d="M39 18c-3 3-6 4-7 4" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" fill="none" />
+  <path d="M25 32c3 2 6 2 7 2" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" fill="none" />
+  <path d="M39 26c-3 2-6 2-7 2" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" fill="none" />
+</svg>

@@ -114,20 +114,17 @@ html, body, #root {
 }
 
 .soboite-logo {
-  width: 30px;
-  height: 30px;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  overflow: hidden;
 }
 
-.soboite-logo svg {
-  width: 24px;
-  height: 24px;
+.soboite-logo img {
+  width: 32px;
+  height: 32px;
+  display: block;
 }
 
 .soboite-wordmark {
