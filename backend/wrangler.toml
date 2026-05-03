@@ -2,6 +2,12 @@ name = "soboite-backend"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 keep_vars = true
+[vars]
+SUPABASE_URL="https://dfdohjlpfrnstqjyakfp.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="sb_secret_XTC2Q7JHDO8l9blaR63P6g_AzAdXq0W"
+ZERNIO_API_KEY="sk_2b335589cc698643421da0f832dce1855987406339bc6d01c7831421c2cf7e10"
+ZERNIO_ACCOUNT_ID="6a4893e69d9472faae70004a"
+GEMINI_API_KEY="AQ.Ab8RN6LjD8B4TWNLmhijOsTCOimUiz_3m3w9HaLOP3eWXG3gLw"
 [dev]
 host = "0.0.0.0"
 port = 8787
@@ -22,4 +28,3 @@ invocation_logs = true
 enabled = false
 persist = true
 head_sampling_rate = 1
-
