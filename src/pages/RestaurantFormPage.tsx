@@ -67,7 +67,8 @@ export default function RestaurantFormPage() {
     addRestaurant,
     updateRestaurant,
     ensureRestaurantType,
-    ensureCuisine
+    ensureCuisine,
+    setNetworkBusy
   } = useStore();
 
   const isEditMode = Boolean(id && id !== 'new');
@@ -87,9 +88,10 @@ export default function RestaurantFormPage() {
   const [initialMapCenter, setInitialMapCenter] = useState<L.LatLng>(L.latLng(18.9442, 72.8276));
   const [isSaving, setIsSaving] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isBusy = loading || isSaving || isLocating;
+  const isBusy = loading || isSaving || isLocating || isGeocoding;
 
   const typeOptions = useMemo(() => {
     const values = [...restaurantTypes, ...restaurants.map((r) => r.type).filter((v): v is string => Boolean(v))];
@@ -146,6 +148,56 @@ export default function RestaurantFormPage() {
     }
   };
 
+  const handleGetPinFromAddress = async () => {
+    if (!address.trim()) {
+      setError('Please enter an address first.');
+      return;
+    }
+    setError(null);
+    setIsGeocoding(true);
+    try {
+      const query = encodeURIComponent(address.trim());
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`);
+      if (!res.ok) throw new Error('Network request failed');
+      const data = await res.json();
+      if (data && data.length > 0) {
+        const result = data[0];
+        const newPos = L.latLng(Number(result.lat), Number(result.lon));
+        setLatLng(newPos);
+        setInitialMapCenter(newPos);
+      } else {
+        setError('Could not find location for this address.');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error finding address');
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
+  const handleGetAddressFromPin = async () => {
+    if (!latLng) {
+      setError('Please drop a pin first.');
+      return;
+    }
+    setError(null);
+    setIsGeocoding(true);
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latLng.lat}&lon=${latLng.lng}&zoom=18&addressdetails=1`);
+      if (!res.ok) throw new Error('Network request failed');
+      const data = await res.json();
+      if (data && data.display_name) {
+        setAddress(data.display_name);
+      } else {
+        setError('Could not get address for this pin.');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error retrieving address from pin');
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isBusy) return;
@@ -162,6 +214,7 @@ export default function RestaurantFormPage() {
 
     setError(null);
     setIsSaving(true);
+    setNetworkBusy(true);
     try {
       if (resolvedType) {
         await ensureRestaurantType(resolvedType);
@@ -201,6 +254,7 @@ export default function RestaurantFormPage() {
       setError(submitError instanceof Error ? submitError.message : 'Could not save restaurant.');
     } finally {
       setIsSaving(false);
+      setNetworkBusy(false);
     }
   };
 
@@ -319,8 +373,11 @@ export default function RestaurantFormPage() {
                 </datalist>
                 <p className="mt-1 text-xs text-gray-500">One word area name, used for filtering.</p>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+              <div className="flex flex-col">
+                <div className="flex justify-between items-end mb-1">
+                  <label className="block text-sm font-medium text-gray-700">Address</label>
+                  <button type="button" onClick={() => void handleGetPinFromAddress()} className="text-xs font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-50" disabled={isGeocoding}>{isGeocoding ? 'Searching...' : 'Put Pin on Map'}</button>
+                </div>
                 <input
                   value={address}
                   onChange={(event) => setAddress(event.target.value)}
@@ -353,16 +410,27 @@ export default function RestaurantFormPage() {
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <label className="text-sm font-medium text-gray-700">Pin Location</label>
-                <button
-                  type="button"
-                  onClick={() => void handleUseCurrentLocation()}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  <LocateFixed size={14} />
-                  {isLocating ? 'Locating...' : 'Use exact current location'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleGetAddressFromPin()}
+                    disabled={isGeocoding}
+                    className="inline-flex items-center px-3 py-1.5 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {isGeocoding ? 'Wait...' : 'Get Address'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleUseCurrentLocation()}
+                    disabled={isLocating}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    <LocateFixed size={14} />
+                    {isLocating ? 'Wait...' : 'Use GPS'}
+                  </button>
+                </div>
               </div>
               <div className="h-72 overflow-hidden rounded-2xl border border-gray-200">
                 <MapContainer

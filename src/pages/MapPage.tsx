@@ -98,6 +98,7 @@ function SelectedRestaurantFlyTo({ restaurant }: { restaurant?: Restaurant | nul
 
   useEffect(() => {
     if (!restaurant) return;
+    if (typeof restaurant.lat !== 'number' || typeof restaurant.lng !== 'number' || isNaN(restaurant.lat) || isNaN(restaurant.lng)) return;
     const target = L.latLng(restaurant.lat, restaurant.lng);
     const nextZoom = Math.max(map.getZoom(), 16);
     map.flyTo(target, nextZoom, {
@@ -109,6 +110,63 @@ function SelectedRestaurantFlyTo({ restaurant }: { restaurant?: Restaurant | nul
 
   return null;
 }
+
+
+
+const getRatingColor = (rating?: number) => {
+  if (rating === undefined) return '#9ca3af';
+  if (rating >= 4.5) return '#16a34a';
+  if (rating >= 3.5) return '#22c55e';
+  if (rating >= 2.5) return '#f59e0b';
+  return '#ef4444';
+};
+
+const truncateName = (name: string) => {
+  if (name.length <= 18) return name;
+  return `${name.slice(0, 18)}...`;
+};
+
+const buildRestaurantIcon = (restaurant: Restaurant, rating?: number, isDim?: boolean, isSelected?: boolean) => {
+  const ratingText = rating === undefined ? '--' : rating.toFixed(1);
+  const color = getRatingColor(rating);
+  const label = truncateName(restaurant.name);
+  const className = [
+    'restaurant-marker',
+    isDim ? 'restaurant-marker--dim' : '',
+    isSelected ? 'restaurant-marker--selected' : ''
+  ].filter(Boolean).join(' ');
+
+  return L.divIcon({
+    className,
+    html: `<div class="restaurant-marker__pin" style="--pin-color:${color}"><span class="restaurant-marker__rating">${ratingText}</span></div><div class="restaurant-marker__label">${label}</div>`,
+    iconSize: [140, 44],
+    iconAnchor: [16, 34]
+  });
+};
+
+const RestaurantMarker = React.memo(({ 
+  restaurant, 
+  rating, 
+  isDim, 
+  isSelected, 
+  onClick 
+}: { 
+  restaurant: Restaurant; 
+  rating?: number; 
+  isDim: boolean; 
+  isSelected: boolean; 
+  onClick: (id: string) => void; 
+}) => {
+  const icon = useMemo(() => buildRestaurantIcon(restaurant, rating, isDim, isSelected), [restaurant, rating, isDim, isSelected]);
+  
+  return (
+    <Marker 
+      position={[restaurant.lat, restaurant.lng]}
+      icon={icon}
+      eventHandlers={{ click: () => onClick(restaurant.id) }}
+    />
+  );
+});
 
 export default function MapPage() {
   const {
@@ -124,7 +182,8 @@ export default function MapPage() {
     fetchData,
     ensureRestaurantType,
     ensureCuisine,
-    ensureFlavorTag
+    ensureFlavorTag,
+    setNetworkBusy
   } = useStore();
   const [selectedRest, setSelectedRest] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -147,6 +206,7 @@ export default function MapPage() {
   const [isDraggingRestaurantPhoto, setIsDraggingRestaurantPhoto] = useState(false);
   const [showDishBuilder, setShowDishBuilder] = useState(false);
   const [isSavingRestaurant, setIsSavingRestaurant] = useState(false);
+  const [isBootstrappingData, setIsBootstrappingData] = useState(true);
   const [addFormError, setAddFormError] = useState<string | null>(null);
   const [dishPhotos, setDishPhotos] = useState<Array<{
     id: string;
@@ -211,7 +271,23 @@ export default function MapPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetchData();
+    let active = true;
+
+    const bootstrap = async () => {
+      try {
+        await fetchData();
+      } finally {
+        if (active) {
+          setIsBootstrappingData(false);
+        }
+      }
+    };
+
+    void bootstrap();
+
+    return () => {
+      active = false;
+    };
   }, [fetchData]);
 
   const ratingsByRestaurant = useMemo(() => {
@@ -838,29 +914,22 @@ export default function MapPage() {
     }
   };
 
-  const getRatingColor = (rating?: number) => {
-    if (rating === undefined) return '#9ca3af';
-    if (rating >= 4.5) return '#16a34a';
-    if (rating >= 3.5) return '#22c55e';
-    if (rating >= 2.5) return '#f59e0b';
-    return '#ef4444';
-  };
-
-  const truncateName = (name: string) => {
-    if (name.length <= 18) return name;
-    return `${name.slice(0, 18)}...`;
-  };
-
   const activeRest = restaurants.find(r => r.id === selectedRest);
   const filteredRestaurants = useMemo(
     () => restaurants.filter(matchesFilters),
     [restaurants, filterTypes, filterCuisines, filterLocations, filterVegOnly, costRange]
   );
 
-  const distanceScore = (a: Restaurant, b: Restaurant) => {
-    const lat = a.lat - b.lat;
-    const lng = a.lng - b.lng;
-    return (lat * lat) + (lng * lng);
+  const getDistanceInMeters = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371e3;
+    const p1 = (lat1 * Math.PI) / 180;
+    const p2 = (lat2 * Math.PI) / 180;
+    const dp = ((lat2 - lat1) * Math.PI) / 180;
+    const dl = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dp / 2) * Math.sin(dp / 2) +
+      Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) * Math.sin(dl / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
   const displayRestaurants = useMemo(() => {
@@ -873,17 +942,22 @@ export default function MapPage() {
       : [selected, ...filteredRestaurants];
 
     const sortedByDistance = pool
-      .map((rest) => ({ rest, score: distanceScore(rest, selected) }))
-      .sort((a, b) => a.score - b.score)
-      .slice(0, 5)
+      .map((rest) => ({
+        rest,
+        distance: getDistanceInMeters(rest.lat, rest.lng, selected.lat, selected.lng),
+      }))
+      .filter((item) => item.distance <= 800)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 10)
       .map((item) => item.rest);
 
     const selectedCard = sortedByDistance.find((rest) => rest.id === selected.id);
     if (!selectedCard) return sortedByDistance;
 
     const others = sortedByDistance.filter((rest) => rest.id !== selected.id);
-    const leftCards = others.slice(0, 2);
-    const rightCards = others.slice(2, 4);
+    const mid = Math.ceil(others.length / 2);
+    const leftCards = others.slice(0, mid);
+    const rightCards = others.slice(mid);
 
     return [...leftCards, selectedCard, ...rightCards];
   }, [filteredRestaurants, restaurants, selectedRest]);
@@ -938,6 +1012,7 @@ export default function MapPage() {
 
     try {
       setIsSavingRestaurant(true);
+      setNetworkBusy(true);
       setAddFormError(null);
       const restaurantId = createId();
       const resolvedLatLng = latLng
@@ -1003,6 +1078,7 @@ export default function MapPage() {
       setAddFormError(error instanceof Error ? error.message : 'Could not save restaurant.');
     } finally {
       setIsSavingRestaurant(false);
+      setNetworkBusy(false);
     }
   };
 
@@ -1066,24 +1142,6 @@ export default function MapPage() {
     }, 120);
   };
 
-  const buildRestaurantIcon = (restaurant: Restaurant, rating?: number, isDim?: boolean, isSelected?: boolean) => {
-    const ratingText = rating === undefined ? '--' : rating.toFixed(1);
-    const color = getRatingColor(rating);
-    const label = truncateName(restaurant.name);
-    const className = [
-      'restaurant-marker',
-      isDim ? 'restaurant-marker--dim' : '',
-      isSelected ? 'restaurant-marker--selected' : ''
-    ].filter(Boolean).join(' ');
-
-    return L.divIcon({
-      className,
-      html: `<div class="restaurant-marker__pin" style="--pin-color:${color}"><span class="restaurant-marker__rating">${ratingText}</span></div><div class="restaurant-marker__label">${label}</div>`,
-      iconSize: [140, 44],
-      iconAnchor: [16, 34]
-    });
-  };
-
   const selectedFilters = [
     ...filterTypes.map((type) => ({
       key: `type:${type}`,
@@ -1111,6 +1169,8 @@ export default function MapPage() {
       onRemove: () => setCostRange({ min: '', max: '' })
     }] : [])
   ];
+
+  const showInitialLoader = (loading || isBootstrappingData) && restaurants.length === 0;
 
   return (
     <div className="relative h-full w-full">
@@ -1293,24 +1353,55 @@ export default function MapPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+        {showInitialLoader && (
+          <div className="absolute inset-0 z-[950] flex items-center justify-center bg-white/80 backdrop-blur-sm px-4 text-center">
+            <div className="rounded-2xl bg-white px-6 py-5 shadow-xl border border-gray-100 flex items-center gap-3 text-gray-800">
+              <Loader2 size={22} className="animate-spin text-red-500" />
+              <span className="font-semibold tracking-wide">Loading restaurants and pins...</span>
+            </div>
+          </div>
+        )}
+
+        {!showInitialLoader && restaurants.length === 0 && !loading && (
+          <div className="absolute inset-0 z-[940] flex items-center justify-center bg-white/60 backdrop-blur-sm px-4 text-center">
+            <div className="max-w-sm rounded-2xl bg-white px-6 py-5 shadow-xl border border-gray-100 text-gray-700">
+              <p className="font-semibold text-gray-900">No restaurant data loaded yet.</p>
+              <p className="mt-2 text-sm text-gray-500">If the pins still do not appear, try fetching again.</p>
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsBootstrappingData(true);
+                  try {
+                    await fetchData(true);
+                  } finally {
+                    setIsBootstrappingData(false);
+                  }
+                }}
+                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800"
+              >
+                Retry load
+              </button>
+            </div>
+          </div>
+        )}
+
       <MapContainer center={[18.9442, 72.8276]} zoom={15} className="h-full w-full" attributionControl={false}>
         <TileLayer 
           url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
         />
+
         <LocationMarker onLocation={setCurrentPosition} />
         <SelectedRestaurantFlyTo restaurant={activeRest} />
         <MapClickHandler onClick={handleMapClick} />
-        {restaurants.map(rest => (
-          <Marker 
+        {restaurants.filter(r => typeof r.lat === 'number' && typeof r.lng === 'number' && !isNaN(r.lat) && !isNaN(r.lng)).map(rest => (
+          <RestaurantMarker 
             key={rest.id} 
-            position={[rest.lat, rest.lng]}
-            icon={buildRestaurantIcon(
-              rest,
-              ratingsByRestaurant.get(rest.id),
-              !matchesFilters(rest),
-              rest.id === selectedRest
-            )}
-            eventHandlers={{ click: () => setSelectedRest(rest.id) }}
+            restaurant={rest}
+            rating={ratingsByRestaurant.get(rest.id)}
+            isDim={!matchesFilters(rest)}
+            isSelected={rest.id === selectedRest}
+            onClick={setSelectedRest}
           />
         ))}
         {latLng && showAddForm && editMode && (
@@ -1344,11 +1435,21 @@ export default function MapPage() {
                     <div
                       role="button"
                       tabIndex={0}
-                      onClick={() => setSelectedRest(rest.id)}
+                      onClick={() => {
+                        if (isSelected) {
+                          navigate(`/restaurant/${rest.id}`);
+                        } else {
+                          setSelectedRest(rest.id);
+                        }
+                      }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
-                          setSelectedRest(rest.id);
+                          if (isSelected) {
+                            navigate(`/restaurant/${rest.id}`);
+                          } else {
+                            setSelectedRest(rest.id);
+                          }
                         }
                       }}
                       className="w-full h-full text-left flex flex-col cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"

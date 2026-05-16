@@ -91,8 +91,9 @@ export default function PhotoCarousel({
     <div className={`relative aspect-square rounded-2xl overflow-hidden border border-gray-100 bg-gray-100 ${className}`}>
       <div
         ref={frameRef}
-        className={`absolute inset-0 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} [touch-action:none]`}
+                className={`absolute inset-0 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} ${scale > 1 ? '[touch-action:none]' : '[touch-action:pan-y]'}`}
         onPointerDown={(event) => {
+          if (event.pointerType === 'touch') return;
           event.currentTarget.setPointerCapture(event.pointerId);
           setIsDragging(true);
           dragRef.current = {
@@ -103,11 +104,12 @@ export default function PhotoCarousel({
           };
         }}
         onPointerMove={(event) => {
+          if (event.pointerType === 'touch') return;
           if (!dragRef.current) return;
           const deltaX = event.clientX - dragRef.current.x;
           const deltaY = event.clientY - dragRef.current.y;
 
-          if (safePhotos.length > 1 && scale <= 1.02 && Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) + 10) {
+          if (safePhotos.length > 1 && scale <= 1.02 && Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
             if (deltaX < 0) {
               showNext();
             } else {
@@ -120,11 +122,13 @@ export default function PhotoCarousel({
 
           setOffset(clampOffset(dragRef.current.ox + deltaX, dragRef.current.oy + deltaY, scale));
         }}
-        onPointerUp={() => {
+        onPointerUp={(event) => {
+          if (event.pointerType === 'touch') return;
           dragRef.current = null;
           setIsDragging(false);
         }}
-        onPointerCancel={() => {
+        onPointerCancel={(event) => {
+          if (event.pointerType === 'touch') return;
           dragRef.current = null;
           setIsDragging(false);
         }}
@@ -163,14 +167,18 @@ export default function PhotoCarousel({
           const active = touchRef.current;
           if (!active) return;
 
-          event.preventDefault();
+          if (scale > 1 || event.touches.length > 1) {
+            if (event.cancelable) {
+              event.preventDefault();
+            }
+          }
 
           if (active.mode === 'pan' && event.touches.length === 1) {
             const touch = event.touches[0];
             const deltaX = touch.clientX - active.startX;
             const deltaY = touch.clientY - active.startY;
 
-            if (safePhotos.length > 1 && scale <= 1.02 && Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) + 10) {
+if (safePhotos.length > 1 && scale <= 1.02 && Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
               if (deltaX < 0) {
                 showNext();
               } else {
@@ -223,7 +231,7 @@ export default function PhotoCarousel({
         <img
           src={activePhoto.url}
           alt="Photo"
-          className="absolute inset-0 h-full w-full object-cover select-none"
+          className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none"
           style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
           draggable={false}
         />
@@ -235,7 +243,7 @@ export default function PhotoCarousel({
         </div>
       )}
 
-      {primaryPhotoId === activePhoto.id && (
+      {editable && primaryPhotoId === activePhoto.id && (
         <div className="absolute top-2 right-2 rounded-md bg-amber-500/90 text-white text-[11px] px-2 py-1 inline-flex items-center gap-1">
           <Star size={11} fill="currentColor" />
           Cover

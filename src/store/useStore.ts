@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { Restaurant, Dish, DishReview, PhotoEntry } from '../types';
 import { supabase } from '../lib/supabase';
 
@@ -157,8 +158,11 @@ interface AppState {
   cuisines: string[];
   flavorTags: string[];
   loading: boolean;
+  networkBusy: boolean;
+  setNetworkBusy: (busy: boolean) => void;
+  lastFetch: number | null;
   
-  fetchData: () => Promise<void>;
+  fetchData: (force?: boolean, background?: boolean) => Promise<void>;
   
   addRestaurant: (restaurant: Restaurant) => Promise<void>;
   updateRestaurant: (id: string, updates: Partial<Restaurant>) => Promise<void>;
@@ -173,17 +177,23 @@ interface AppState {
   ensureFlavorTag: (value: string) => Promise<void>;
 }
 
+let activeFetchId = 0;
+
 export const useStore = create<AppState>()(
-  (set, get) => ({
-    editMode: true,
-    setEditMode: (mode) => set({ editMode: mode }),
-    
-    restaurants: [],
-    dishes: [],
-    restaurantTypes: [],
-    cuisines: [],
-    flavorTags: [],
-    loading: false,
+  persist(
+    (set, get) => ({
+      editMode: true,
+      setEditMode: (mode) => set({ editMode: mode }),
+      
+      restaurants: [],
+      dishes: [],
+      restaurantTypes: [],
+      cuisines: [],
+      flavorTags: [],
+      loading: false,
+      networkBusy: false,
+      setNetworkBusy: (busy) => set({ networkBusy: busy }),
+      lastFetch: null,
 
     ensureRestaurantType: async (value: string) => {
       const normalized = value.trim();
@@ -245,29 +255,43 @@ export const useStore = create<AppState>()(
       });
     },
 
-    fetchData: async () => {
-      set({ loading: true });
-      console.log("Starting data fetch from Supabase...");
+    fetchData: async (force = false, background = false) => {
+      const now = Date.now();
+      const state = get();
+      if (!force && state.lastFetch && now - state.lastFetch < 24 * 60 * 60 * 1000 && state.restaurants.length > 0) {
+        console.log("Using cached data.");
+        get().fetchData(true, true);
+        return;
+      }
+      if (!background) {
+        set({ loading: true });
+      }
+      const fetchId = ++activeFetchId;
+      console.log("Starting data fetch from Supabase... (Fetch ID:", fetchId, ")");
       try {
-        const [restRes, dishRes, typeRes, cuisineRes, flavorTagRes] = await Promise.all([
-          supabase.from('restaurants').select('*'),
-          supabase.from('dishes').select('*'),
-          supabase.from('restaurant_types').select('name'),
-          supabase.from('cuisines').select('name'),
-          supabase.from('flavor_tags').select('name')
-        ]);
+        const restPromise = supabase.from('restaurants').select('*');
+        const dishPromise = supabase.from('dishes').select('*');
+        const typePromise = supabase.from('restaurant_types').select('name');
+        const cuisinePromise = supabase.from('cuisines').select('name');
+        const flavorTagPromise = supabase.from('flavor_tags').select('name');
+
+        const restRes = await restPromise;
 
         console.log("Supabase Restaurants Response:", { data: restRes.data, error: restRes.error });
-        console.log("Supabase Dishes Response:", { data: dishRes.data, error: dishRes.error });
 
-        if (restRes.error) console.error("Restaurant fetch error:", restRes.error);
-        if (dishRes.error) console.error("Dish fetch error:", dishRes.error);
-        if (typeRes.error && !typeRes.error.message.includes('does not exist')) console.error("Restaurant types fetch error:", typeRes.error);
-        if (cuisineRes.error && !cuisineRes.error.message.includes('does not exist')) console.error("Cuisines fetch error:", cuisineRes.error);
-        if (flavorTagRes.error && !flavorTagRes.error.message.includes('does not exist')) console.error("Flavor tags fetch error:", flavorTagRes.error);
+        if (fetchId !== activeFetchId) {
+          console.log("Fetch ID mismatch. Aborting this fetch.", fetchId);
+          return;
+        }
 
-        let mappedRests: Restaurant[] = [];
-        let mappedDishes: Dish[] = [];
+        if (restRes.error) {
+          console.error("Restaurant fetch error:", restRes.error);
+          if (!background) set({ loading: false });
+          return;
+        }
+
+        let mappedRests: Restaurant[] = state.restaurants;
+        let mappedDishes: Dish[] = state.dishes;
 
         if (restRes.data) {
           mappedRests = restRes.data.map((r: any) => ({
@@ -281,8 +305,8 @@ export const useStore = create<AppState>()(
             })(),
             id: r.id, 
             name: r.name,
-            lat: r.lat ?? r.latitude,
-            lng: r.lng ?? r.longitude,
+            lat: Number(r.lat ?? r.latitude) || 18.9442,
+            lng: Number(r.lng ?? r.longitude) || 72.8276,
             locationName: r.location_name ?? r.locationName,
             address: r.address,
             vegOnly: Boolean(r.veg_only ?? r.vegOnly),
@@ -294,13 +318,42 @@ export const useStore = create<AppState>()(
             })(),
             type: r.type,
             cuisine: r.cuisine,
-            costForTwo: r.cost_for_two,
+            costForTwo: r.cost_for_two ?? r.costForTwo,
             ambienceRating: r.ambience_rating ?? r.ambienceRating,
             serviceRating: r.service_rating ?? r.serviceRating,
             createdAt: r.created_at || r.createdAt
           }));
+
+          if (fetchId !== activeFetchId) return;
+
+          try {
+            // Push restaurants as soon as they are ready so map pins can render earlier.
+            set({ restaurants: mappedRests });
+          } catch (e) {
+            console.warn("Storage quota exceeded while caching restaurants:", e);
+          }
         }
+
+        const [dishRes, typeRes, cuisineRes, flavorTagRes] = await Promise.all([
+          dishPromise,
+          typePromise,
+          cuisinePromise,
+          flavorTagPromise
+        ]);
+
+        console.log("Supabase Dishes Response:", { data: dishRes.data, error: dishRes.error });
+        if (dishRes.error) {
+          console.error("Dish fetch error:", dishRes.error);
+          if (!background) set({ loading: false });
+          return;
+        }
+
+        if (typeRes.error && !typeRes.error.message.includes('does not exist')) console.error("Restaurant types fetch error:", typeRes.error);
+        if (cuisineRes.error && !cuisineRes.error.message.includes('does not exist')) console.error("Cuisines fetch error:", cuisineRes.error);
+        if (flavorTagRes.error && !flavorTagRes.error.message.includes('does not exist')) console.error("Flavor tags fetch error:", flavorTagRes.error);
         
+        if (fetchId !== activeFetchId) return;
+
         if (dishRes.data) {
           mappedDishes = dishRes.data.map((d: any) => {
             const reviews = normalizeReviews(d.reviews, d.review, d.review_date ?? d.reviewDate);
@@ -312,7 +365,7 @@ export const useStore = create<AppState>()(
               id: d.id,
               name: d.name,
               restaurantId: d.restaurant_id || d.restaurantId,
-              rating: d.rating,
+              rating: typeof d.rating === 'number' ? d.rating : Number(d.rating) || 0,
               priceLevel: Math.min(3, Math.max(1, Number(d.price_level || d.priceLevel || 1))) as 1 | 2 | 3,
               actualPrice: d.actual_price ?? d.actualPrice,
               review: latestReview?.text ?? d.review,
@@ -323,7 +376,7 @@ export const useStore = create<AppState>()(
               imageUrl: resolvePrimaryPhotoUrl(photos, primaryPhotoId, d.image_url),
               isRecommended: Boolean(d.is_recommended ?? d.isRecommended),
               cuisine: d.cuisine,
-              flavorTags: d.flavor_tags
+              flavorTags: d.flavor_tags ?? d.flavorTags
             };
           });
         }
@@ -346,7 +399,8 @@ export const useStore = create<AppState>()(
           dishes: mappedDishes,
           restaurantTypes: uniqueSorted(tableTypes.length > 0 ? tableTypes : derivedTypes),
           cuisines: uniqueSorted(tableCuisines.length > 0 ? tableCuisines : derivedCuisines),
-          flavorTags: uniqueSorted(tableFlavorTags.length > 0 ? tableFlavorTags : derivedFlavorTags)
+          flavorTags: uniqueSorted(tableFlavorTags.length > 0 ? tableFlavorTags : derivedFlavorTags),
+          lastFetch: Date.now()
         });
       } catch (error) {
         console.error("Error fetching data:", error);
@@ -356,7 +410,9 @@ export const useStore = create<AppState>()(
     },
     
     addRestaurant: async (restaurant) => {
-      const normalizedPhotos = normalizePhotos(restaurant.photos, restaurant.imageUrl);
+      set({ networkBusy: true });
+      try {
+        const normalizedPhotos = normalizePhotos(restaurant.photos, restaurant.imageUrl);
       const primaryPhotoId = resolvePrimaryPhotoId(normalizedPhotos, restaurant.primaryPhotoId);
       const resolvedImageUrl = resolvePrimaryPhotoUrl(normalizedPhotos, primaryPhotoId, restaurant.imageUrl);
       const normalizedRestaurant: Restaurant = {
@@ -397,12 +453,17 @@ export const useStore = create<AppState>()(
         error = retry.error;
       }
       if (error) {
-        throw new Error(error.message);
+          throw new Error(error.message);
+        }
+        set((state) => ({ restaurants: [...state.restaurants, normalizedRestaurant] }));
+      } finally {
+        set({ networkBusy: false });
       }
-      set((state) => ({ restaurants: [...state.restaurants, normalizedRestaurant] }));
     },
     updateRestaurant: async (id, updates) => {
-      const current = get().restaurants.find((restaurant) => restaurant.id === id);
+      set({ networkBusy: true });
+      try {
+        const current = get().restaurants.find((restaurant) => restaurant.id === id);
       const normalizedUpdates = { ...updates };
 
       if (normalizedUpdates.photos !== undefined || normalizedUpdates.primaryPhotoId !== undefined || normalizedUpdates.imageUrl !== undefined) {
@@ -463,15 +524,19 @@ export const useStore = create<AppState>()(
       set((state) => ({
         restaurants: state.restaurants.map((r) => r.id === id ? { ...r, ...normalizedUpdates } : r)
       }));
+      } finally {
+        set({ networkBusy: false });
+      }
     },
     deleteRestaurant: async (id) => {
-      const { error: restaurantError } = await supabase.from('restaurants').delete().eq('id', id);
-      if (restaurantError) {
-        throw new Error(restaurantError.message);
-      }
+      activeFetchId++; // Invalidate any ongoing background fetches
       const { error: dishError } = await supabase.from('dishes').delete().eq('restaurant_id', id);
       if (dishError) {
         throw new Error(dishError.message);
+      }
+      const { error: restaurantError } = await supabase.from('restaurants').delete().eq('id', id);
+      if (restaurantError) {
+        throw new Error(restaurantError.message);
       }
       set((state) => ({
         restaurants: state.restaurants.filter((r) => r.id !== id),
@@ -564,7 +629,7 @@ export const useStore = create<AppState>()(
         && removeMissingColumnsFromPayload(
           dbDish,
           error,
-          ['actual_price', 'review_date', 'reviews', 'photos', 'primary_photo_id', 'is_recommended']
+          ['actual_price', 'review_date', 'reviews', 'photos', 'primary_photo_id', 'is_recommended', 'cuisine', 'flavor_tags']
         )
       ) {
         const retry = await supabase.from('dishes').insert(dbDish);
@@ -651,7 +716,7 @@ export const useStore = create<AppState>()(
         && removeMissingColumnsFromPayload(
           dbUpdates,
           error,
-          ['actual_price', 'review_date', 'reviews', 'photos', 'primary_photo_id', 'is_recommended']
+          ['actual_price', 'review_date', 'reviews', 'photos', 'primary_photo_id', 'is_recommended', 'cuisine', 'flavor_tags']
         )
       ) {
         const retry = await supabase.from('dishes').update(dbUpdates).eq('id', id);
@@ -673,5 +738,19 @@ export const useStore = create<AppState>()(
         dishes: state.dishes.filter((d) => d.id !== id)
       }));
     },
-  })
+  }),
+  {
+    name: 'soboite-storage',
+    partialize: (state) => ({
+      editMode: state.editMode,
+      restaurants: state.restaurants.map(r => ({ ...r, photos: undefined, imageUrl: undefined })),
+      dishes: state.dishes.map(d => ({ ...d, photos: undefined, imageUrl: undefined })),
+      restaurantTypes: state.restaurantTypes,
+      cuisines: state.cuisines,
+      flavorTags: state.flavorTags,
+      lastFetch: state.lastFetch,
+    }),
+  }
+  )
 );
+

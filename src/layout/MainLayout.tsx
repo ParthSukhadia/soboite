@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, FormEvent } from 'react';
 import { Outlet, Link } from 'react-router-dom';
-import { DatabaseZap, Download, Settings2, Upload } from 'lucide-react';
+import { DatabaseZap, Download, Settings2, Upload, LogIn, LogOut, Lock, X, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
 
@@ -92,8 +92,12 @@ function SoboiteIcon() {
 }
 
 export default function MainLayout() {
-  const { fetchData } = useStore();
+  const { fetchData, editMode, setEditMode, networkBusy } = useStore();
   const [showSettings, setShowSettings] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
@@ -239,6 +243,18 @@ export default function MainLayout() {
     }
   };
 
+  const handleLoginSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (loginPassword === 'soboite123') {
+      setEditMode(true);
+      setShowLoginModal(false);
+      setLoginPassword('');
+      setLoginError(false);
+    } else {
+      setLoginError(true);
+    }
+  };
+
   return (
     <div className="flex flex-col h-dvh overflow-hidden">
       <header className="bg-white border-b border-gray-200 shadow-sm z-[3000] px-4 py-3 flex justify-between items-center relative">
@@ -247,21 +263,46 @@ export default function MainLayout() {
           <span className="soboite-wordmark">Soboite</span>
         </Link>
 
-        <div className="relative">
-          <button
-            type="button"
-            disabled={isProcessing}
-            onClick={() => setShowSettings((prev) => !prev)}
-            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            <Settings2 size={14} />
-            Settings
-          </button>
+        <div className="flex items-center gap-3">
+          {editMode ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEditMode(false);
+                setShowSettings(false);
+              }}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <LogOut size={14} />
+              Logout
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowLoginModal(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <LogIn size={14} />
+              Login
+            </button>
+          )}
 
-          {showSettings && (
-            <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-gray-200 bg-white shadow-xl p-3 z-[3100]">
-              <input
-                ref={importFileRef}
+          {editMode && (
+            <div className="relative">
+              <button
+                type="button"
+                disabled={isProcessing}
+                onClick={() => setShowSettings((prev) => !prev)}
+                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <Settings2 size={14} />
+                Settings
+              </button>
+
+              {showSettings && (
+                <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-gray-200 bg-white shadow-xl p-3 z-[3100]">
+                  <input
+                    ref={importFileRef}
                 type="file"
                 accept="application/json"
                 className="hidden"
@@ -318,12 +359,80 @@ export default function MainLayout() {
               )}
             </div>
           )}
+          </div>
+        )}
         </div>
       </header>
+
+      {showLoginModal && (
+        <div className="fixed inset-0 z-[4000] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-6 auto py-5 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Lock size={20} className="text-red-500" />
+                Login
+              </h2>
+              <button 
+                type="button" 
+                onClick={() => {
+                  setShowLoginModal(false);
+                  setLoginPassword('');
+                  setLoginError(false);
+                }}
+                className="text-gray-400 hover:text-black p-1 rounded-full hover:bg-gray-100 transition"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleLoginSubmit} className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Password</label>
+                <div className="relative">
+                  <input 
+                    type={showPassword ? 'text' : 'password'}
+                    autoFocus
+                    required
+                    value={loginPassword}
+                    onChange={(e) => {
+                      setLoginPassword(e.target.value);
+                      setLoginError(false);
+                    }}
+                    className={`w-full px-4 py-3 pr-12 rounded-xl bg-gray-50 border ${loginError ? 'border-red-300 focus:ring-red-500 text-red-900 bg-red-50' : 'border-gray-200 focus:ring-black'} focus:outline-none focus:ring-2 transition shadow-inner`}
+                    placeholder="Enter profile password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 p-1"
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                {loginError && <p className="text-red-500 text-xs mt-2 font-medium">Incorrect password. Please try again.</p>}
+              </div>
+              <button 
+                type="submit"
+                className="w-full bg-black text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition active:scale-95 flex items-center justify-center gap-2"
+              >
+                Login to edit
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       <main className="flex-1 min-h-0 relative overflow-hidden bg-gray-50">
         <Outlet />
       </main>
+
+      {networkBusy && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-white/70 backdrop-blur-sm pointer-events-none">
+          <div className="bg-white px-6 py-4 rounded-2xl shadow-xl flex items-center gap-3 animate-in fade-in zoom-in-95 duration-200">
+             <Loader2 size={24} className="animate-spin text-red-500" />
+             <span className="text-gray-800 font-semibold tracking-wide">Processing...</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
