@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MapContainer, Marker, TileLayer, useMapEvents } from 'react-leaflet';
+import { MapContainer, Marker, TileLayer, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { ArrowLeft, Loader2, LocateFixed } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -7,6 +7,14 @@ import { useStore } from '../store/useStore';
 
 function MapClickHandler({ onPick }: { onPick: (latlng: L.LatLng) => void }) {
   useMapEvents({ click: (event) => onPick(event.latlng) });
+  return null;
+}
+
+function MapUpdater({ center }: { center: L.LatLng }) {
+  const map = useMap();
+  useEffect(() => {
+    map.flyTo(center, map.getZoom());
+  }, [center, map]);
   return null;
 }
 
@@ -111,7 +119,11 @@ export default function RestaurantFormPage() {
   }, [restaurants]);
 
   useEffect(() => {
-    if (restaurants.length > 0) return;
+    if (restaurants.length > 0) {
+      // Trigger a background fetch to ensure fresh images / cache update
+      void fetchData();
+      return;
+    }
     void fetchData();
   }, [fetchData, restaurants.length]);
 
@@ -440,6 +452,7 @@ export default function RestaurantFormPage() {
                 >
                   <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
                   <MapClickHandler onPick={setLatLng} />
+                  <MapUpdater center={initialMapCenter} />
                   {latLng && <Marker position={[latLng.lat, latLng.lng]} />}
                 </MapContainer>
               </div>

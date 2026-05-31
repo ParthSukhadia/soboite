@@ -1,6 +1,6 @@
-import { useRef, useState, FormEvent } from 'react';
+import { useRef, useState, FormEvent, useEffect } from 'react';
 import { Outlet, Link } from 'react-router-dom';
-import { DatabaseZap, Download, Settings2, Upload, LogIn, LogOut, Lock, X, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { DatabaseZap, Download, Settings2, Upload, LogIn, LogOut, Lock, X, Eye, EyeOff, Loader2, RotateCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
 
@@ -92,7 +92,18 @@ function SoboiteIcon() {
 }
 
 export default function MainLayout() {
-  const { fetchData, editMode, setEditMode, networkBusy } = useStore();
+  const {
+    fetchData,
+    editMode,
+    setEditMode,
+    networkBusy,
+    addRestaurantToState,
+    updateRestaurantInState,
+    deleteRestaurantFromState,
+    addDishToState,
+    updateDishInState,
+    deleteDishFromState
+  } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginPassword, setLoginPassword] = useState('');
@@ -100,7 +111,75 @@ export default function MainLayout() {
   const [showPassword, setShowPassword] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const importFileRef = useRef<HTMLInputElement | null>(null);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    setStatusMessage(null);
+    try {
+      await fetchData(true); // force = true
+      setStatusMessage('Data refreshed successfully.');
+      setTimeout(() => {
+        setStatusMessage((curr) => curr === 'Data refreshed successfully.' ? null : curr);
+      }, 3000);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Refresh failed.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    console.log("Setting up Supabase Realtime Postgres change channels...");
+    const channel = supabase
+      .channel('soboite-db-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'restaurants' },
+        (payload) => {
+          console.log('Realtime Restaurant Change:', payload);
+          const { eventType, new: newRecord, old: oldRecord } = payload;
+          if (eventType === 'INSERT') {
+            addRestaurantToState(newRecord);
+          } else if (eventType === 'UPDATE') {
+            updateRestaurantInState(newRecord.id, newRecord);
+          } else if (eventType === 'DELETE') {
+            deleteRestaurantFromState(oldRecord.id);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'dishes' },
+        (payload) => {
+          console.log('Realtime Dish Change:', payload);
+          const { eventType, new: newRecord, old: oldRecord } = payload;
+          if (eventType === 'INSERT') {
+            addDishToState(newRecord);
+          } else if (eventType === 'UPDATE') {
+            updateDishInState(newRecord.id, newRecord);
+          } else if (eventType === 'DELETE') {
+            deleteDishFromState(oldRecord.id);
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log(`Supabase Realtime Channel status: ${status}`);
+      });
+
+    return () => {
+      console.log("Cleaning up Supabase Realtime Postgres change channels...");
+      void supabase.removeChannel(channel);
+    };
+  }, [
+    addRestaurantToState,
+    updateRestaurantInState,
+    deleteRestaurantFromState,
+    addDishToState,
+    updateDishInState,
+    deleteDishFromState
+  ]);
 
   const exportAllData = async () => {
     setIsProcessing(true);
@@ -264,6 +343,17 @@ export default function MainLayout() {
         </Link>
 
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            disabled={isRefreshing || networkBusy || isProcessing}
+            onClick={handleRefresh}
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition"
+            title="Fetch latest details from server"
+          >
+            <RotateCw size={14} className={`${isRefreshing ? 'animate-spin text-red-500' : 'text-gray-500 hover:text-gray-700'}`} />
+            <span className="hidden sm:inline font-medium">Refresh</span>
+          </button>
+
           {editMode ? (
             <button
               type="button"

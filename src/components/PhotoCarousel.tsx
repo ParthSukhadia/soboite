@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Star, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Star, Trash2, ImageOff } from 'lucide-react';
 import { PhotoEntry } from '../types';
 
 interface PhotoCarouselProps {
@@ -27,6 +27,7 @@ export default function PhotoCarousel({
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  const [imageError, setImageError] = useState(false);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const touchRef = useRef<{
@@ -54,6 +55,7 @@ export default function PhotoCarousel({
   useEffect(() => {
     setScale(1);
     setOffset({ x: 0, y: 0 });
+    setImageError(false);
   }, [index]);
 
   const clampOffset = (nextX: number, nextY: number, targetScale: number) => {
@@ -228,13 +230,20 @@ if (safePhotos.length > 1 && scale <= 1.02 && Math.abs(deltaX) > 40 && Math.abs(
           }
         }}
       >
-        <img
-          src={activePhoto.url}
-          alt="Photo"
-          className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none"
-          style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
-          draggable={false}
-        />
+        {imageError ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-100 text-gray-400 h-full w-full">
+            <ImageOff size={48} />
+          </div>
+        ) : (
+          <img
+            src={activePhoto.url}
+            alt="Photo"
+            className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none"
+            style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+            draggable={false}
+            onError={() => setImageError(true)}
+          />
+        )}
       </div>
 
       {showDate && (

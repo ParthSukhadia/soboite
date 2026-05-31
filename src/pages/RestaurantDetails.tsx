@@ -18,6 +18,7 @@ import PriceLevelIcon from "../components/PriceLevelIcon";
 import PhotoCarousel from "../components/PhotoCarousel";
 import { useStore } from "../store/useStore";
 import { Dish, DishReview, PhotoEntry } from "../types";
+import { optimizeImage } from "../lib/imageOptimization";
 
 const dishSchema = z.object({
   name: z.string().trim().min(1, "Dish name is required"),
@@ -123,6 +124,7 @@ export default function RestaurantDetails() {
     editMode,
     loading,
     fetchData,
+    fetchRestaurantPhotos,
     addDish,
     updateDish,
     updateRestaurant,
@@ -216,6 +218,7 @@ export default function RestaurantDetails() {
   const [deletingDishIds, setDeletingDishIds] = useState<string[]>([]);
   const [isBootstrappingRestaurant, setIsBootstrappingRestaurant] =
     useState(true);
+  const [loadingPhotos, setLoadingPhotos] = useState(true);
 
   const restaurantPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const dishPhotoInputRef = useRef<HTMLInputElement | null>(null);
@@ -260,6 +263,8 @@ export default function RestaurantDetails() {
     const bootstrap = async () => {
       if (restaurants.length > 0) {
         if (active) setIsBootstrappingRestaurant(false);
+        // Trigger a background fetch to ensure stale/imageless cache gets populated
+        void fetchData();
         return;
       }
       try {
@@ -274,6 +279,22 @@ export default function RestaurantDetails() {
       active = false;
     };
   }, [fetchData, restaurants.length]);
+
+  useEffect(() => {
+    if (!id) return;
+    let active = true;
+    setLoadingPhotos(true);
+    fetchRestaurantPhotos(id)
+      .catch((err) => console.error("Error fetching restaurant photos:", err))
+      .finally(() => {
+        if (active) {
+          setLoadingPhotos(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [id, fetchRestaurantPhotos]);
 
   if (!restaurant && (loading || isBootstrappingRestaurant)) {
     return (
@@ -290,19 +311,11 @@ export default function RestaurantDetails() {
     );
   }
 
-  const fileToDataUrl = (file: File) =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("Failed to read file"));
-      reader.readAsDataURL(file);
-    });
-
   const filesToPhotos = async (
     files: FileList | null,
   ): Promise<PhotoEntry[]> => {
     if (!files || files.length === 0) return [];
-    const urls = await Promise.all(Array.from(files).map(fileToDataUrl));
+    const urls = await Promise.all(Array.from(files).map((file) => optimizeImage(file)));
     const now = new Date().toISOString();
     return urls.map((url) => ({ id: createId(), url, uploadedAt: now }));
   };
@@ -678,7 +691,16 @@ export default function RestaurantDetails() {
         <ArrowLeft size={20} /> Back to map
       </button>
 
-      {(restaurantPhotos.length > 0 || editMode) && (
+      {loadingPhotos ? (
+        <div className="mb-6 space-y-3">
+          <div className="relative aspect-square rounded-2xl overflow-hidden animate-shimmer border border-gray-100 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-2.5 bg-white/70 px-4 py-3 rounded-2xl shadow-sm backdrop-blur-xs">
+              <Loader2 size={24} className="animate-spin text-amber-500" />
+              <span className="text-xs text-gray-500 font-semibold tracking-wide">Fetching gallery...</span>
+            </div>
+          </div>
+        </div>
+      ) : (restaurantPhotos.length > 0 || editMode) && (
         <div className="mb-6 space-y-3">
           <PhotoCarousel
             photos={restaurantPhotos}
@@ -889,80 +911,92 @@ export default function RestaurantDetails() {
           </div>
         )}
 
-        {recommendedDishes.length > 0 && (
-          <div>
-            <div className="px-2 mb-3">
-              <h3 className="text-sm font-bold tracking-wide text-amber-700 uppercase">
-                Recommended Dishes
-              </h3>
-            </div>
-            <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-4 px-2 -mx-2 hide-scrollbar items-start">
-              {recommendedDishes.map((dish) => {
-                const dishPhotos = asPhotos(dish.photos, dish.imageUrl);
-                const primaryDishPhotoId = resolvePrimaryPhotoId(
-                  dishPhotos,
-                  dish.primaryPhotoId,
-                );
-                const isEditing = editingDishId === dish.id && editingDishDraft;
+        {sectionedDishes.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 px-2 mb-8">
+            {sectionedDishes.map((dish) => {
+              const dishPhotos = asPhotos(dish.photos, dish.imageUrl);
+              const primaryDishPhotoId = resolvePrimaryPhotoId(
+                dishPhotos,
+                dish.primaryPhotoId,
+              );
+              const isEditing = editingDishId === dish.id && editingDishDraft;
 
-                return (
-                  <div
-                    key={dish.id}
-                    className="min-w-[85vw] max-w-[340px] sm:min-w-[300px] snap-center flex-none"
+              return (
+                <div
+                  key={dish.id}
+                  className="w-full"
+                >
+                  <motion.div
+                    layout
+                    className={`bg-white rounded-2xl p-5 shadow-[0_2px_10px_rgba(0,0,0,0.04)] border relative group transition-all duration-200 ${dish.isRecommended ? "border-amber-200 bg-gradient-to-br from-white via-white to-amber-50/15" : "border-gray-100"}`}
                   >
-                    <motion.div
-                      layout
-                      className="bg-white rounded-2xl p-5 shadow-[0_2px_10px_rgba(0,0,0,0.04)] border border-gray-100 relative group h-full"
-                    >
-                      <div className="absolute top-3 right-3 flex items-center gap-1 z-10">
+                    <div className="absolute top-3 right-3 flex items-center gap-1 z-10">
+                      <button
+                        type="button"
+                        disabled={isApiBusy}
+                        onClick={() => handleQuickToggleRecommended(dish)}
+                        className={`p-2 rounded-full border ${dish.isRecommended ? "bg-amber-50 text-amber-500 border-amber-200" : "bg-white text-gray-400 border-gray-200"} disabled:opacity-60 disabled:cursor-not-allowed`}
+                        aria-label="Toggle recommended"
+                        title="Mark as recommended"
+                      >
+                        <Star
+                          size={14}
+                          fill={dish.isRecommended ? "currentColor" : "none"}
+                        />
+                      </button>
+                      {editMode && (
                         <button
                           type="button"
                           disabled={isApiBusy}
-                          onClick={() => handleQuickToggleRecommended(dish)}
-                          className={`p-2 rounded-full border ${dish.isRecommended ? "bg-amber-50 text-amber-500 border-amber-200" : "bg-white text-gray-400 border-gray-200"} disabled:opacity-60 disabled:cursor-not-allowed`}
-                          aria-label="Toggle recommended"
-                          title="Mark as recommended"
+                          onClick={() => openEditDish(dish)}
+                          className="p-2 rounded-full border border-gray-200 bg-white text-gray-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                          aria-label="Edit dish"
                         >
-                          <Star
-                            size={14}
-                            fill={dish.isRecommended ? "currentColor" : "none"}
-                          />
+                          <Pencil size={14} />
                         </button>
-                        {editMode && (
-                          <button
-                            type="button"
-                            disabled={isApiBusy}
-                            onClick={() => openEditDish(dish)}
-                            className="p-2 rounded-full border border-gray-200 bg-white text-gray-500 disabled:opacity-60 disabled:cursor-not-allowed"
-                            aria-label="Edit dish"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                        )}
-                        {editMode && (
-                          <button
-                            type="button"
-                            disabled={isApiBusy}
-                            onClick={() => handleDeleteDish(dish.id)}
-                            className="p-2 rounded-full border border-red-200 bg-red-50 text-red-500 disabled:opacity-60 disabled:cursor-not-allowed"
-                            aria-label="Delete dish"
-                          >
-                            {deletingDishIds.includes(dish.id) ? (
-                              <Loader2 size={14} className="animate-spin" />
-                            ) : (
-                              <Trash2 size={14} />
-                            )}
-                          </button>
-                        )}
-                      </div>
+                      )}
+                      {editMode && (
+                        <button
+                          type="button"
+                          disabled={isApiBusy}
+                          onClick={() => handleDeleteDish(dish.id)}
+                          className="p-2 rounded-full border border-red-200 bg-red-50 text-red-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                          aria-label="Delete dish"
+                        >
+                          {deletingDishIds.includes(dish.id) ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Trash2 size={14} />
+                          )}
+                        </button>
+                      )}
+                    </div>
 
-                      {dishPhotos.length > 0 && (
-                        <div className="mb-3 relative">
+                    <div className="flex flex-col sm:flex-row gap-5">
+                      {loadingPhotos ? (
+                        <div className="w-full sm:w-44 sm:h-44 flex-shrink-0 relative rounded-2xl overflow-hidden animate-shimmer border border-gray-100 flex items-center justify-center">
+                          <Loader2 size={16} className="animate-spin text-amber-500" />
+                          <div className="absolute right-2 bottom-2 inline-flex items-center gap-2 rounded-lg bg-white/90 px-2 py-1 shadow-sm z-10">
+                            <PriceLevelIcon
+                              level={Math.min(3, Math.max(1, dish.priceLevel))}
+                              actualPrice={dish.actualPrice}
+                              noteSize={20}
+                              className="h-8 w-8 text-gray-300"
+                            />
+                            {typeof dish.actualPrice === "number" && (
+                              <span className="text-gray-400 font-semibold text-xs">
+                                ₹{dish.actualPrice}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ) : dishPhotos.length > 0 ? (
+                        <div className="w-full sm:w-44 sm:h-44 flex-shrink-0 relative">
                           <PhotoCarousel
                             photos={dishPhotos}
                             primaryPhotoId={primaryDishPhotoId}
                           />
-                          <div className="absolute right-2 bottom-2 inline-flex items-center gap-2 rounded-lg bg-white/90 px-2 py-1 shadow-sm">
+                          <div className="absolute right-2 bottom-2 inline-flex items-center gap-2 rounded-lg bg-white/90 px-2 py-1 shadow-sm z-10">
                             <PriceLevelIcon
                               level={Math.min(3, Math.max(1, dish.priceLevel))}
                               actualPrice={dish.actualPrice}
@@ -976,310 +1010,317 @@ export default function RestaurantDetails() {
                             )}
                           </div>
                         </div>
-                      )}
+                      ) : null}
 
-                      {dishPhotos.length === 0 && (
-                        <div className="flex items-center justify-end mb-2">
-                          <PriceLevelIcon
-                            level={Math.min(3, Math.max(1, dish.priceLevel))}
-                            actualPrice={dish.actualPrice}
-                            noteSize={20}
-                            className="h-8 w-8"
-                          />
-                          {typeof dish.actualPrice === "number" && (
-                            <span className="ml-1 text-gray-900 font-semibold text-xs">
-                              ₹{dish.actualPrice}
-                            </span>
-                          )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-3 mb-2 pr-28">
+                          <h3 className="text-lg font-bold text-gray-900 leading-tight flex flex-wrap items-center gap-2">
+                            {dish.name}
+                            {dish.isRecommended && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                                ★ Recommended
+                              </span>
+                            )}
+                          </h3>
                         </div>
-                      )}
 
-                      <div className="flex items-start justify-between gap-3 mb-2 pr-28">
-                        <h3 className="text-lg font-bold text-gray-900 leading-tight">
-                          {dish.name}
-                        </h3>
-                      </div>
-
-                      <div className="flex gap-1 mb-3 text-yellow-400">
-                        {[...Array(5)].map((_, i) => (
-                          <Star
-                            key={i}
-                            size={16}
-                            fill={i < dish.rating ? "currentColor" : "none"}
-                            color={i < dish.rating ? "currentColor" : "#e5e7eb"}
-                          />
-                        ))}
-                      </div>
-
-                      {(dish.cuisine ||
-                        (dish.flavorTags && dish.flavorTags.length > 0)) && (
-                        <div className="flex flex-wrap gap-2 mb-3">
-                          {dish.cuisine && (
-                            <span className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded-full">
-                              {dish.cuisine}
-                            </span>
-                          )}
-                          {dish.flavorTags?.map((tag) => (
-                            <span
-                              key={tag}
-                              className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded-full"
-                            >
-                              {tag}
-                            </span>
+                        <div className="flex gap-1 mb-3 text-yellow-400">
+                          {[...Array(5)].map((_, i) => (
+                            <Star
+                              key={i}
+                              size={16}
+                              fill={i < dish.rating ? "currentColor" : "none"}
+                              color={i < dish.rating ? "currentColor" : "#e5e7eb"}
+                            />
                           ))}
                         </div>
-                      )}
 
-                      {getDishReviews(dish).length > 0 && (
-                        <div className="space-y-2 mt-4">
-                          {getDishReviews(dish).map((entry) => (
-                            <div
-                              key={entry.id}
-                              className="bg-gray-50 rounded-lg px-3 py-2 border border-gray-100"
-                            >
-                              <div className="text-[11px] font-semibold text-gray-500 mb-1">
-                                {entry.date}
-                              </div>
-                              <p className="text-gray-600 leading-relaxed text-sm">
-                                {entry.text}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {isEditing && (
-                        <div className="mt-4 border-t border-gray-200 pt-4 space-y-3">
-                          <h4 className="text-sm font-semibold text-gray-700">
-                            Edit Dish
-                          </h4>
-
-                          <div>
-                            <label className="block text-sm font-medium mb-1">
-                              Dish Name
-                            </label>
-                            <input
-                              value={editingDishDraft.name}
-                              onChange={(event) =>
-                                updateEditingDraft({ name: event.target.value })
-                              }
-                              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                            />
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-sm font-medium mb-1">
-                                Rating
-                              </label>
-                              <input
-                                type="number"
-                                min="1"
-                                max="5"
-                                value={editingDishDraft.rating}
-                                onChange={(event) =>
-                                  updateEditingDraft({
-                                    rating: Number(event.target.value),
-                                  })
-                                }
-                                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium mb-1">
-                                Actual Price (₹)
-                              </label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={editingDishDraft.actualPrice}
-                                onChange={(event) =>
-                                  updateEditingDraft({
-                                    actualPrice: event.target.value,
-                                  })
-                                }
-                                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                              />
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium mb-1">
-                              Price Icons
-                            </label>
-                            <div className="flex gap-2">
-                              {[1, 2, 3].map((level) => (
-                                <button
-                                  key={level}
-                                  type="button"
-                                  onClick={() =>
-                                    updateEditingDraft({
-                                      priceLevel: level as 1 | 2 | 3,
-                                    })
-                                  }
-                                  className={`w-10 h-10 rounded-full flex items-center justify-center ${editingDishDraft.priceLevel === level ? "bg-green-100 border border-green-300 text-green-700" : "bg-gray-50 text-gray-500 border border-gray-200"}`}
-                                >
-                                  <PriceLevelIcon level={level} noteSize={10} />
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium mb-1">
-                              Description
-                            </label>
-                            <textarea
-                              rows={3}
-                              value={editingDishDraft.review}
-                              onChange={(event) =>
-                                updateEditingDraft({
-                                  review: event.target.value,
-                                })
-                              }
-                              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                            />
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-sm font-medium mb-1">
-                                Review Date
-                              </label>
-                              <input
-                                type="date"
-                                value={editingDishDraft.reviewDate}
-                                onChange={(event) =>
-                                  updateEditingDraft({
-                                    reviewDate: event.target.value,
-                                  })
-                                }
-                                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium mb-1">
-                                Cuisine
-                              </label>
-                              <select
-                                value={editingDishDraft.cuisine}
-                                onChange={(event) =>
-                                  updateEditingDraft({
-                                    cuisine: event.target.value,
-                                  })
-                                }
-                                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                        {(dish.cuisine ||
+                          (dish.flavorTags && dish.flavorTags.length > 0)) && (
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            {dish.cuisine && (
+                              <span className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded-full">
+                                {dish.cuisine}
+                              </span>
+                            )}
+                            {dish.flavorTags?.map((tag) => (
+                              <span
+                                key={tag}
+                                className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded-full"
                               >
-                                <option value="">Select cuisine</option>
-                                {cuisineOptions.map((option) => (
-                                  <option key={option} value={option}>
-                                    {option}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
+                                {tag}
+                              </span>
+                            ))}
                           </div>
+                        )}
 
-                          <div>
-                            <TagSelector
-                              selectedTags={editingDishDraft.tags}
-                              availableTags={flavorTags}
-                              onChange={(tags) => updateEditingDraft({ tags })}
-                              onCreateTag={ensureFlavorTag}
-                              placeholder="Type to search or add"
+                        {dishPhotos.length === 0 && (
+                          <div className="flex items-center gap-1.5 mb-3 bg-gray-50/50 self-start px-2 py-1 rounded-lg border border-gray-100 w-fit">
+                            <PriceLevelIcon
+                              level={Math.min(3, Math.max(1, dish.priceLevel))}
+                              actualPrice={dish.actualPrice}
+                              noteSize={16}
+                              className="h-6 w-6"
                             />
+                            {typeof dish.actualPrice === "number" && (
+                              <span className="text-gray-900 font-semibold text-xs">
+                                ₹{dish.actualPrice}
+                              </span>
+                            )}
                           </div>
+                        )}
 
+                        {getDishReviews(dish).length > 0 && (
+                          <div className="space-y-2 mt-3">
+                            {getDishReviews(dish).map((entry) => (
+                              <div
+                                key={entry.id}
+                                className="bg-gray-50 rounded-lg px-3 py-2 border border-gray-100"
+                              >
+                                <div className="text-[11px] font-semibold text-gray-500 mb-1">
+                                  {entry.date}
+                                </div>
+                                <p className="text-gray-600 leading-relaxed text-sm">
+                                  {entry.text}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {isEditing && (
+                      <div className="mt-4 border-t border-gray-200 pt-4 space-y-3">
+                        <h4 className="text-sm font-semibold text-gray-700">
+                          Edit Dish
+                        </h4>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-1">
+                            Dish Name
+                          </label>
+                          <input
+                            value={editingDishDraft.name}
+                            onChange={(event) =>
+                              updateEditingDraft({ name: event.target.value })
+                            }
+                            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
                             <label className="block text-sm font-medium mb-1">
-                              Photos
+                              Rating
                             </label>
-                            <PhotoCarousel
-                              photos={editingDishDraft.photos}
-                              primaryPhotoId={editingDishDraft.primaryPhotoId}
-                              editable
-                              onPrimaryChange={(photoId) =>
-                                updateEditingDraft({ primaryPhotoId: photoId })
-                              }
-                              onRemovePhoto={(photoId) => {
-                                const next = editingDishDraft.photos.filter(
-                                  (photo) => photo.id !== photoId,
-                                );
-                                updateEditingDraft({
-                                  photos: next,
-                                  primaryPhotoId: resolvePrimaryPhotoId(
-                                    next,
-                                    editingDishDraft.primaryPhotoId === photoId
-                                      ? undefined
-                                      : editingDishDraft.primaryPhotoId,
-                                  ),
-                                });
-                              }}
-                            />
                             <input
-                              ref={editDishPhotoInputRef}
-                              type="file"
-                              accept="image/*"
-                              multiple
-                              onChange={(event) =>
-                                addPhotosToEditingDish(event.target.files)
-                              }
-                              className="hidden"
-                            />
-                            <button
-                              type="button"
-                              disabled={isApiBusy}
-                              onClick={() =>
-                                editDishPhotoInputRef.current?.click()
-                              }
-                              className="mt-2 inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
-                            >
-                              <ImagePlus size={14} />
-                              Add dish photos
-                            </button>
-                          </div>
-
-                          <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
-                            <input
-                              type="checkbox"
-                              checked={editingDishDraft.isRecommended}
+                              type="number"
+                              min="1"
+                              max="5"
+                              value={editingDishDraft.rating}
                               onChange={(event) =>
                                 updateEditingDraft({
-                                  isRecommended: event.target.checked,
+                                  rating: Number(event.target.value),
                                 })
                               }
+                              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
                             />
-                            Recommended dish
-                          </label>
-
-                          <div className="flex items-center gap-2 pt-1">
-                            <button
-                              type="button"
-                              disabled={isApiBusy}
-                              onClick={closeEditDish}
-                              className="px-3 py-2 rounded-xl bg-gray-100 text-gray-700 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isApiBusy}
-                              onClick={saveEditedDish}
-                              className="px-3 py-2 rounded-xl bg-black text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
-                            >
-                              {isSavingDish ? (
-                                <Loader2 size={14} className="animate-spin" />
-                              ) : null}
-                              Save changes
-                            </button>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium mb-1">
+                              Actual Price (₹)
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={editingDishDraft.actualPrice}
+                              onChange={(event) =>
+                                updateEditingDraft({
+                                  actualPrice: event.target.value,
+                                })
+                              }
+                              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                            />
                           </div>
                         </div>
-                      )}
-                    </motion.div>
-                  </div>
-                );
-              })}
-            </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-1">
+                            Price Icons
+                          </label>
+                          <div className="flex gap-2">
+                            {[1, 2, 3].map((level) => (
+                              <button
+                                key={level}
+                                type="button"
+                                onClick={() =>
+                                  updateEditingDraft({
+                                    priceLevel: level as 1 | 2 | 3,
+                                  })
+                                }
+                                className={`w-10 h-10 rounded-full flex items-center justify-center ${editingDishDraft.priceLevel === level ? "bg-green-100 border border-green-300 text-green-700" : "bg-gray-50 text-gray-500 border border-gray-200"}`}
+                              >
+                                <PriceLevelIcon level={level} noteSize={10} />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-1">
+                            Description
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={editingDishDraft.review}
+                            onChange={(event) =>
+                              updateEditingDraft({
+                                review: event.target.value,
+                              })
+                            }
+                            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-sm font-medium mb-1">
+                              Review Date
+                            </label>
+                            <input
+                              type="date"
+                              value={editingDishDraft.reviewDate}
+                              onChange={(event) =>
+                                updateEditingDraft({
+                                  reviewDate: event.target.value,
+                                })
+                              }
+                              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium mb-1">
+                              Cuisine
+                            </label>
+                            <select
+                              value={editingDishDraft.cuisine}
+                              onChange={(event) =>
+                                updateEditingDraft({
+                                  cuisine: event.target.value,
+                                })
+                              }
+                              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                            >
+                              <option value="">Select cuisine</option>
+                              {cuisineOptions.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <TagSelector
+                            selectedTags={editingDishDraft.tags}
+                            availableTags={flavorTags}
+                            onChange={(tags) => updateEditingDraft({ tags })}
+                            onCreateTag={ensureFlavorTag}
+                            placeholder="Type to search or add"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-1">
+                            Photos
+                          </label>
+                          <PhotoCarousel
+                            photos={editingDishDraft.photos}
+                            primaryPhotoId={editingDishDraft.primaryPhotoId}
+                            editable
+                            onPrimaryChange={(photoId) =>
+                              updateEditingDraft({ primaryPhotoId: photoId })
+                            }
+                            onRemovePhoto={(photoId) => {
+                              const next = editingDishDraft.photos.filter(
+                                (photo) => photo.id !== photoId,
+                              );
+                              updateEditingDraft({
+                                photos: next,
+                                primaryPhotoId: resolvePrimaryPhotoId(
+                                  next,
+                                  editingDishDraft.primaryPhotoId === photoId
+                                    ? undefined
+                                    : editingDishDraft.primaryPhotoId,
+                                ),
+                              });
+                            }}
+                          />
+                          <input
+                            ref={editDishPhotoInputRef}
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={(event) =>
+                              addPhotosToEditingDish(event.target.files)
+                            }
+                            className="hidden"
+                          />
+                          <button
+                            type="button"
+                            disabled={isApiBusy}
+                            onClick={() =>
+                              editDishPhotoInputRef.current?.click()
+                            }
+                            className="mt-2 inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            <ImagePlus size={14} />
+                            Add dish photos
+                          </button>
+                        </div>
+
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={editingDishDraft.isRecommended}
+                            onChange={(event) =>
+                              updateEditingDraft({
+                                isRecommended: event.target.checked,
+                              })
+                            }
+                          />
+                          Recommended dish
+                        </label>
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            disabled={isApiBusy}
+                            onClick={closeEditDish}
+                            className="px-3 py-2 rounded-xl bg-gray-100 text-gray-700 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isApiBusy}
+                            onClick={saveEditedDish}
+                            className="px-3 py-2 rounded-xl bg-black text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
+                          >
+                            {isSavingDish ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : null}
+                            Save changes
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

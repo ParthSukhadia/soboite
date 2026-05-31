@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, X, Star, Utensils, SlidersHorizontal, RotateCcw, ImagePlus, Loader2 } from 'lucide-react';
 import L from 'leaflet';
 import { Restaurant } from '../types';
+import { optimizeImage } from '../lib/imageOptimization';
 import TagSelector from '../components/TagSelector';
 import PriceLevelIcon from '../components/PriceLevelIcon';
 
@@ -208,6 +209,13 @@ export default function MapPage() {
   const [isSavingRestaurant, setIsSavingRestaurant] = useState(false);
   const [isBootstrappingData, setIsBootstrappingData] = useState(true);
   const [addFormError, setAddFormError] = useState<string | null>(null);
+  // Controlled inputs for step 3 (persisted to sessionStorage so switching apps doesn't lose data)
+  const [newRestName, setNewRestName] = useState(() => sessionStorage.getItem('draft_restName') ?? '');
+  const [newRestNotes, setNewRestNotes] = useState(() => sessionStorage.getItem('draft_restNotes') ?? '');
+  const [newRestLocationName, setNewRestLocationName] = useState(() => sessionStorage.getItem('draft_restLocationName') ?? '');
+  const [newRestAddress, setNewRestAddress] = useState(() => sessionStorage.getItem('draft_restAddress') ?? '');
+  // Step-2 geocoding state
+  const [isGeocodingAddress, setIsGeocodingAddress] = useState(false);
   const [dishPhotos, setDishPhotos] = useState<Array<{
     id: string;
     imageUrl: string;
@@ -371,12 +379,7 @@ export default function MapPage() {
     setCostRange({ min: '', max: '' });
   };
 
-  const fileToDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsDataURL(file);
-  });
+  const fileToDataUrl = (file: File) => optimizeImage(file);
 
   const createId = () => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -397,13 +400,54 @@ export default function MapPage() {
   };
 
   const openAddForm = () => {
-    navigate('/restaurant/new');
+    setShowAddForm(true);
+    setAddStep(1);
   };
 
   const closeAddForm = () => {
     setShowAddForm(false);
     setAddFormError(null);
     setLatLng(null);
+    setAddStep(1);
+    setNewRestName('');
+    setNewRestNotes('');
+    setNewRestLocationName('');
+    setNewRestAddress('');
+    setRestaurantPhoto('');
+    setRestaurantPhotoPosition({ x: 50, y: 50 });
+    setRestaurantPhotoZoom(1);
+    restaurantPhotoNextPositionRef.current = { x: 50, y: 50 };
+    setDishPhotos([]);
+    setShowDishBuilder(false);
+    // Clear session-storage draft
+    sessionStorage.removeItem('draft_restName');
+    sessionStorage.removeItem('draft_restNotes');
+    sessionStorage.removeItem('draft_restLocationName');
+    sessionStorage.removeItem('draft_restAddress');
+  };
+
+  const handleGeocodeAddressForForm = async () => {
+    if (!newRestAddress.trim()) {
+      setAddFormError('Please enter an address first.');
+      return;
+    }
+    setAddFormError(null);
+    setIsGeocodingAddress(true);
+    try {
+      const query = encodeURIComponent(newRestAddress.trim());
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`);
+      if (!res.ok) throw new Error('Network request failed');
+      const data = await res.json();
+      if (data && data.length > 0) {
+        setLatLng({ lat: Number(data[0].lat), lng: Number(data[0].lon) });
+      } else {
+        setAddFormError('Could not find location for this address. Try a more specific address.');
+      }
+    } catch (e) {
+      setAddFormError(e instanceof Error ? e.message : 'Error finding address.');
+    } finally {
+      setIsGeocodingAddress(false);
+    }
   };
 
   const handleFormFocusCapture = (event: React.FocusEvent<HTMLFormElement>) => {
@@ -467,6 +511,9 @@ export default function MapPage() {
 
   const handleRestaurantPhotoTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
     if (!restaurantPhoto || !restaurantPhotoPreviewRef.current) return;
+    // Prevent the parent scrollable sheet from intercepting this touch
+    event.preventDefault();
+    event.stopPropagation();
 
     if (event.touches.length === 1) {
       const touch = event.touches[0];
@@ -981,16 +1028,16 @@ export default function MapPage() {
   const handleAddSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (isApiBusy) return;
-    const data = new FormData(e.currentTarget);
-    const name = data.get('name') as string;
-    const notes = data.get('notes') as string;
+    const name = newRestName.trim();
+    const notes = newRestNotes.trim();
     const selectedType = restaurantTypeSelection === '__custom__' ? customRestaurantType : restaurantTypeSelection;
     const selectedCuisine = restaurantCuisineSelection === '__custom__' ? customRestaurantCuisine : restaurantCuisineSelection;
     const type = selectedType.trim();
     const cuisine = selectedCuisine.trim();
-    const locationName = String(data.get('locationName') ?? '').trim().split(/\s+/).filter(Boolean)[0] ?? '';
-    const address = String(data.get('address') ?? '').trim();
-    const costForTwoInput = data.get('costForTwo') as string;
+    const locationName = newRestLocationName.trim().split(/\s+/).filter(Boolean)[0] ?? '';
+    const address = newRestAddress.trim();
+    const formData = new FormData(e.currentTarget);
+    const costForTwoInput = formData.get('costForTwo') as string;
     const costForTwo = costForTwoInput ? Number(costForTwoInput) : undefined;
 
     if (!name) {
@@ -1456,7 +1503,12 @@ export default function MapPage() {
                     >
                       <div className="relative h-full">
                         {rest.imageUrl ? (
-                          <img src={rest.imageUrl} alt={rest.name} className="w-full h-full object-cover" />
+                          <img 
+                            src={rest.imageUrl} 
+                            alt={rest.name} 
+                            className="w-full h-full object-cover" 
+                            onError={(e) => { e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3Crect width='1' height='1' fill='%23e5e7eb'/%3E%3C/svg%3E"; }}
+                          />
                         ) : (
                           <div className="w-full h-full bg-gradient-to-br from-gray-200 to-gray-100" />
                         )}
@@ -1596,31 +1648,60 @@ export default function MapPage() {
               <div className={addStep === 2 ? '' : 'hidden'}>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Set Location</label>
                 <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (currentPosition) {
-                        setLatLng({ lat: currentPosition.lat, lng: currentPosition.lng });
-                      }
-                    }}
-                    className="w-full bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200"
-                  >
-                    Use current location
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLatLng(null)}
-                    className="w-full bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200"
-                  >
-                    Place pin on map
-                  </button>
+                  {/* Address geocoding */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Address (optional)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newRestAddress}
+                        onChange={(e) => {
+                          setNewRestAddress(e.target.value);
+                          sessionStorage.setItem('draft_restAddress', e.target.value);
+                        }}
+                        placeholder="Street, landmark, city..."
+                        className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        disabled={isGeocodingAddress || !newRestAddress.trim()}
+                        onClick={() => void handleGeocodeAddressForForm()}
+                        className="px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                      >
+                        {isGeocodingAddress ? 'Finding…' : 'Find on Map'}
+                      </button>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-400">Enter address then tap "Find on Map" to drop the pin automatically.</p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (currentPosition) {
+                          setLatLng({ lat: currentPosition.lat, lng: currentPosition.lng });
+                        }
+                      }}
+                      className="flex-1 bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200 text-sm"
+                    >
+                      Use GPS location
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLatLng(null)}
+                      className="flex-1 bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200 text-sm"
+                    >
+                      Tap map to pin
+                    </button>
+                  </div>
+
                   {!latLng ? (
                     <div className="p-3 bg-orange-50 border border-orange-200 text-orange-600 rounded-xl text-center text-sm">
                       No pin selected. You can skip and we will use your current/default location.
                     </div>
                   ) : (
                     <div className="p-3 bg-green-50 border border-green-200 text-green-700 rounded-xl text-center text-sm">
-                      Pin set at {latLng.lat.toFixed(4)}, {latLng.lng.toFixed(4)}
+                      📍 Pin set at {latLng.lat.toFixed(5)}, {latLng.lng.toFixed(5)}
                     </div>
                   )}
                 </div>
@@ -1630,17 +1711,29 @@ export default function MapPage() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                    <input required name="name" className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none" placeholder="Restaurant name" />
+                    <input
+                      required
+                      value={newRestName}
+                      onChange={(e) => { setNewRestName(e.target.value); sessionStorage.setItem('draft_restName', e.target.value); }}
+                      className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                      placeholder="Restaurant name"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    <textarea name="notes" className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none" placeholder="Atmosphere, cuisine type..." />
+                    <textarea
+                      value={newRestNotes}
+                      onChange={(e) => { setNewRestNotes(e.target.value); sessionStorage.setItem('draft_restNotes', e.target.value); }}
+                      className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                      placeholder="Atmosphere, cuisine type..."
+                    />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Location Name</label>
                       <input
-                        name="locationName"
+                        value={newRestLocationName}
+                        onChange={(e) => { setNewRestLocationName(e.target.value); sessionStorage.setItem('draft_restLocationName', e.target.value); }}
                         className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
                         placeholder="Fort"
                       />
@@ -1649,7 +1742,8 @@ export default function MapPage() {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
                       <input
-                        name="address"
+                        value={newRestAddress}
+                        onChange={(e) => { setNewRestAddress(e.target.value); sessionStorage.setItem('draft_restAddress', e.target.value); }}
                         className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
                         placeholder="Street and landmark"
                       />
@@ -1754,7 +1848,8 @@ export default function MapPage() {
                               <div key={dish.id} className="border border-gray-200 rounded-xl p-3 space-y-3">
                                 {dish.imageUrl && (
                                   <div
-                                    className={`w-full rounded-lg overflow-hidden aspect-square relative [touch-action:none] ${draggingDishPhotoId === dish.id ? 'cursor-grabbing' : 'cursor-grab'}`}
+                                    className={`w-full rounded-lg overflow-hidden relative [touch-action:none] ${draggingDishPhotoId === dish.id ? 'cursor-grabbing' : 'cursor-grab'}`}
+                                    style={{ height: '12rem' }}
                                     onPointerDown={(event) => handleDishPhotoPointerDown(dish.id, event)}
                                     onPointerMove={handleDishPhotoPointerMove}
                                     onPointerUp={handleDishPhotoPointerUp}
