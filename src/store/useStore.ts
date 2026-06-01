@@ -457,6 +457,17 @@ export const useStore = create<AppState>()(
     },
     
     fetchRestaurantPhotos: async (restaurantId: string) => {
+      const state = get();
+      const currentRestaurant = state.restaurants.find((restaurant) => restaurant.id === restaurantId);
+      const currentDishes = state.dishes.filter((dish) => dish.restaurantId === restaurantId);
+
+      const restaurantHasPhotos = Boolean(currentRestaurant && ((currentRestaurant.photos?.length ?? 0) > 0 || currentRestaurant.imageUrl));
+      const dishesHavePhotos = currentDishes.length === 0 || currentDishes.every((dish) => ((dish.photos?.length ?? 0) > 0 || dish.imageUrl));
+
+      if (restaurantHasPhotos && dishesHavePhotos) {
+        return;
+      }
+
       const restPromise = supabase
         .from('restaurants')
         .select('photos, image_url, primary_photo_id')

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -113,6 +113,13 @@ const resolvePrimaryPhotoUrl = (
   return photos[0]?.url;
 };
 
+const averageRating = (values: Array<number | undefined>) => {
+  const numericValues = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (numericValues.length === 0) return undefined;
+  const average = numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length;
+  return Math.round(average * 10) / 10;
+};
+
 export default function RestaurantDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -169,6 +176,28 @@ export default function RestaurantDetails() {
     });
   }, [dishes, id]);
 
+  const dishAverageRating = useMemo(() => {
+    return averageRating(restaurantDishes.map((dish) => dish.rating));
+  }, [restaurantDishes]);
+
+  const overallRating = useMemo(() => {
+    return averageRating([
+      restaurant?.ambienceRating,
+      restaurant?.serviceRating,
+      dishAverageRating,
+    ]);
+  }, [dishAverageRating, restaurant?.ambienceRating, restaurant?.serviceRating]);
+
+  const needsPhotoFetch = useMemo(() => {
+    if (!id) return false;
+    if (!restaurant) return true;
+    const restaurantNeedsRefresh = !restaurant.photos?.length && !restaurant.imageUrl;
+    const dishesNeedRefresh = restaurantDishes.some(
+      (dish) => !dish.photos?.length && !dish.imageUrl,
+    );
+    return restaurantNeedsRefresh || dishesNeedRefresh;
+  }, [id, restaurant, restaurantDishes]);
+
   const recommendedDishes = useMemo(
     () => restaurantDishes.filter((dish) => Boolean(dish.isRecommended)),
     [restaurantDishes],
@@ -206,6 +235,23 @@ export default function RestaurantDetails() {
   const [newDishPrimaryPhotoId, setNewDishPrimaryPhotoId] = useState<
     string | undefined
   >();
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchEntries, setBatchEntries] = useState<
+    Array<{
+      photoId: string;
+      name: string;
+      rating: number;
+      priceLevel: 1 | 2 | 3;
+      actualPrice: string;
+      review: string;
+      reviewDate: string;
+      cuisine: string;
+      tags: string[];
+      isRecommended: boolean;
+    }>
+  >([]);
+  const [uploadChoiceOpen, setUploadChoiceOpen] = useState(false);
+  const [pendingDishFiles, setPendingDishFiles] = useState<File[]>([]);
   const [addDishError, setAddDishError] = useState<string | null>(null);
   const [editingDishId, setEditingDishId] = useState<string | null>(null);
   const [editingDishDraft, setEditingDishDraft] =
@@ -282,6 +328,10 @@ export default function RestaurantDetails() {
 
   useEffect(() => {
     if (!id) return;
+    if (!needsPhotoFetch) {
+      setLoadingPhotos(false);
+      return;
+    }
     let active = true;
     setLoadingPhotos(true);
     fetchRestaurantPhotos(id)
@@ -294,7 +344,32 @@ export default function RestaurantDetails() {
     return () => {
       active = false;
     };
-  }, [id, fetchRestaurantPhotos]);
+  }, [id, needsPhotoFetch, fetchRestaurantPhotos]);
+
+  // Keep batch-entry rows in sync with selected photos.
+  useEffect(() => {
+    if (!batchMode) return;
+    setBatchEntries((prev) => {
+      const map = new Map(prev.map((e) => [e.photoId, e]));
+      const next = newDishPhotos.map((photo) => {
+        const existing = map.get(photo.id);
+        if (existing) return existing;
+        return {
+          photoId: photo.id,
+          name: "",
+          rating: 5,
+          priceLevel: 2 as 1 | 2 | 3,
+          actualPrice: "",
+          review: "",
+          reviewDate: new Date().toISOString().slice(0, 10),
+          cuisine: "",
+          tags: [] as string[],
+          isRecommended: false,
+        };
+      });
+      return next;
+    });
+  }, [newDishPhotos, batchMode]);
 
   if (!restaurant && (loading || isBootstrappingRestaurant)) {
     return (
@@ -312,7 +387,7 @@ export default function RestaurantDetails() {
   }
 
   const filesToPhotos = async (
-    files: FileList | null,
+    files: FileList | File[] | null,
   ): Promise<PhotoEntry[]> => {
     if (!files || files.length === 0) return [];
     const urls = await Promise.all(Array.from(files).map((file) => optimizeImage(file)));
@@ -388,9 +463,9 @@ export default function RestaurantDetails() {
     if (isApiBusy) return;
     if (!confirm("Delete this restaurant and all its dishes?")) return;
     setIsDeletingRestaurant(true);
+    navigate("/", { replace: true });
     try {
       await deleteRestaurant(restaurant.id);
-      navigate("/", { replace: true });
     } finally {
       setIsDeletingRestaurant(false);
     }
@@ -461,6 +536,20 @@ export default function RestaurantDetails() {
     }
   };
 
+  const handleInlineDishRatingUpdate = async (dish: Dish, nextRating: number) => {
+    if (isApiBusy) return;
+    const safeRating = Math.max(1, Math.min(5, nextRating));
+    setIsSavingDish(true);
+    try {
+      await updateDish(dish.id, { rating: safeRating });
+      if (editingDishId === dish.id && editingDishDraft) {
+        setEditingDishDraft({ ...editingDishDraft, rating: safeRating });
+      }
+    } finally {
+      setIsSavingDish(false);
+    }
+  };
+
   const openEditDish = (dish: Dish) => {
     const photos = asPhotos(dish.photos, dish.imageUrl);
     const reviews = getDishReviews(dish);
@@ -509,6 +598,125 @@ export default function RestaurantDetails() {
     });
     if (editDishPhotoInputRef.current) {
       editDishPhotoInputRef.current.value = "";
+    }
+  };
+
+  const toggleBatchMode = () => {
+    setBatchMode((v) => !v);
+  };
+
+  const closeUploadChoiceModal = () => {
+    setUploadChoiceOpen(false);
+    setPendingDishFiles([]);
+  };
+
+  const applyPendingDishFiles = async (separate: boolean) => {
+    const files = pendingDishFiles;
+    if (files.length === 0) {
+      closeUploadChoiceModal();
+      return;
+    }
+
+    setShowAddDish(true);
+    const incoming = await filesToPhotos(files);
+    setNewDishPhotos((prev) => {
+      const next = [...prev, ...incoming];
+      setNewDishPrimaryPhotoId((current) =>
+        resolvePrimaryPhotoId(next, current),
+      );
+      return next;
+    });
+
+    if (separate) {
+      setBatchMode(true);
+    } else {
+      setBatchMode(false);
+      setBatchEntries([]);
+    }
+
+    closeUploadChoiceModal();
+  };
+
+  const updateBatchEntry = (photoId: string, patch: Partial<typeof batchEntries[number]>) => {
+    setBatchEntries((prev) => prev.map((e) => (e.photoId === photoId ? { ...e, ...patch } : e)));
+  };
+
+  const openAddAndPick = () => {
+    setShowAddDish(true);
+    setAddDishError(null);
+    setDishNameDuplicateError(null);
+    // wait for form/input to render then open file picker
+    setTimeout(() => dishPhotoInputRef.current?.click(), 60);
+  };
+
+  const submitBatch = async () => {
+    if (isApiBusy) return;
+    if (batchEntries.length === 0) return;
+
+    const incompleteEntry = batchEntries.find(
+      (entry) => !entry.name.trim() || !entry.review.trim(),
+    );
+    if (incompleteEntry) {
+      setAddDishError("Each separate dish needs a name and a review.");
+      return;
+    }
+
+    setIsSavingDish(true);
+    try {
+      // Ensure cuisines and tags
+      const cuisinesToEnsure = Array.from(new Set(batchEntries.map((b) => b.cuisine).filter(Boolean)));
+      await Promise.all(cuisinesToEnsure.map((c) => ensureCuisine(c)));
+      const tagsToEnsure = Array.from(new Set(batchEntries.flatMap((b) => b.tags)));
+      if (tagsToEnsure.length > 0) await Promise.all(tagsToEnsure.map((t) => ensureFlavorTag(t)));
+
+      // Create each dish
+      await Promise.all(batchEntries.map(async (entry) => {
+        const photo = newDishPhotos.find((p) => p.id === entry.photoId);
+        const photos = photo ? [photo] : [];
+        const primaryPhotoId = photo?.id;
+        const imageUrl = photo?.url;
+
+        const parsedActualPrice = entry.actualPrice ? Number(entry.actualPrice) : Number.NaN;
+        await addDish({
+          id: createId(),
+          restaurantId: restaurant.id,
+          name: entry.name.trim() || "",
+          rating: Math.max(1, Math.min(5, entry.rating)),
+          priceLevel: Math.min(3, Math.max(1, entry.priceLevel)) as 1 | 2 | 3,
+          actualPrice: Number.isFinite(parsedActualPrice) ? parsedActualPrice : undefined,
+          review: entry.review.trim() || undefined,
+          reviewDate: entry.reviewDate,
+          reviews: [
+            {
+              id: createId(),
+              text: entry.review.trim(),
+              date: entry.reviewDate,
+              createdAt: Date.now(),
+            },
+          ],
+          imageUrl,
+          photos: photos.length > 0 ? photos : undefined,
+          primaryPhotoId,
+          isRecommended: Boolean(entry.isRecommended),
+          cuisine: entry.cuisine || undefined,
+          flavorTags: entry.tags.length > 0 ? entry.tags : undefined,
+        });
+      }));
+
+      // Cleanup after batch create
+      setShowAddDish(false);
+      setNewDishPhotos([]);
+      setNewDishPrimaryPhotoId(undefined);
+      setBatchEntries([]);
+      setBatchMode(false);
+      setSelectedDishTags([]);
+      setDishCuisineSelection("");
+      setCustomDishCuisine("");
+      reset();
+      setValue("reviewDate", new Date().toISOString().slice(0, 10));
+      setValue("isRecommended", false);
+    } finally {
+      setIsSavingDish(false);
     }
   };
 
@@ -585,7 +793,19 @@ export default function RestaurantDetails() {
 
   const handleAddDishPhotos = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
+    // Ensure add-dish form is visible when photos chosen
+    setShowAddDish(true);
+    if (files.length > 1) {
+      setPendingDishFiles(Array.from(files));
+      setUploadChoiceOpen(true);
+      if (dishPhotoInputRef.current) {
+        dishPhotoInputRef.current.value = "";
+      }
+      return;
+    }
+
     const incoming = await filesToPhotos(files);
+    setBatchMode(false);
     setNewDishPhotos((prev) => {
       const next = [...prev, ...incoming];
       setNewDishPrimaryPhotoId((current) =>
@@ -593,6 +813,7 @@ export default function RestaurantDetails() {
       );
       return next;
     });
+
     if (dishPhotoInputRef.current) {
       dishPhotoInputRef.current.value = "";
     }
@@ -600,6 +821,12 @@ export default function RestaurantDetails() {
 
   const onSubmit = async (data: DishForm) => {
     if (isApiBusy) return;
+
+    if (batchMode) {
+      // If batch mode is enabled, create multiple dishes from batch entries
+      await submitBatch();
+      return;
+    }
 
     setAddDishError(null);
     if (validateDishNameDuplicate(data.name)) {
@@ -676,6 +903,15 @@ export default function RestaurantDetails() {
     } finally {
       setIsSavingDish(false);
     }
+  };
+
+  const submitAddDishForm = (event: FormEvent<HTMLFormElement>) => {
+    if (batchMode) {
+      event.preventDefault();
+      void submitBatch();
+      return;
+    }
+    void handleSubmit(onSubmit)(event);
   };
 
   return (
@@ -758,6 +994,12 @@ export default function RestaurantDetails() {
         <h1 className="text-3xl font-extrabold text-gray-900">
           {restaurant.name}
         </h1>
+        {typeof overallRating === "number" && (
+          <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-900 border border-amber-200">
+            <Star size={14} fill="currentColor" />
+            Overall {overallRating.toFixed(1)}/5
+          </div>
+        )}
         {restaurant.notes && (
           <p className="text-gray-600 mt-2">{restaurant.notes}</p>
         )}
@@ -889,11 +1131,7 @@ export default function RestaurantDetails() {
           <p className="text-gray-500 mb-4">No dishes added yet.</p>
           {editMode && (
             <button
-              onClick={() => {
-                setShowAddDish(true);
-                setAddDishError(null);
-                setDishNameDuplicateError(null);
-              }}
+              onClick={() => openAddAndPick()}
               disabled={isApiBusy}
               className="text-red-500 font-medium hover:underline disabled:opacity-60 disabled:cursor-not-allowed"
             >
@@ -1026,12 +1264,29 @@ export default function RestaurantDetails() {
 
                         <div className="flex gap-1 mb-3 text-yellow-400">
                           {[...Array(5)].map((_, i) => (
-                            <Star
-                              key={i}
-                              size={16}
-                              fill={i < dish.rating ? "currentColor" : "none"}
-                              color={i < dish.rating ? "currentColor" : "#e5e7eb"}
-                            />
+                            editMode ? (
+                              <button
+                                key={i}
+                                type="button"
+                                disabled={isApiBusy}
+                                onClick={() => handleInlineDishRatingUpdate(dish, i + 1)}
+                                className={`transition-colors ${i < dish.rating ? "text-yellow-400" : "text-gray-300"} disabled:opacity-70 disabled:cursor-not-allowed`}
+                                aria-label={`Set rating to ${i + 1} out of 5`}
+                              >
+                                <Star
+                                  size={16}
+                                  fill={i < dish.rating ? "currentColor" : "none"}
+                                  color={i < dish.rating ? "currentColor" : "#e5e7eb"}
+                                />
+                              </button>
+                            ) : (
+                              <Star
+                                key={i}
+                                size={16}
+                                fill={i < dish.rating ? "currentColor" : "none"}
+                                color={i < dish.rating ? "currentColor" : "#e5e7eb"}
+                              />
+                            )
                           ))}
                         </div>
 
@@ -1087,6 +1342,8 @@ export default function RestaurantDetails() {
                             ))}
                           </div>
                         )}
+
+
                       </div>
                     </div>
 
@@ -1114,18 +1371,29 @@ export default function RestaurantDetails() {
                             <label className="block text-sm font-medium mb-1">
                               Rating
                             </label>
-                            <input
-                              type="number"
-                              min="1"
-                              max="5"
-                              value={editingDishDraft.rating}
-                              onChange={(event) =>
-                                updateEditingDraft({
-                                  rating: Number(event.target.value),
-                                })
-                              }
-                              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                            />
+                            <div className="flex flex-wrap items-center gap-1">
+                              {[1, 2, 3, 4, 5].map((star) => {
+                                const filled = editingDishDraft.rating >= star;
+                                return (
+                                  <button
+                                    key={`edit-rating-${star}`}
+                                    type="button"
+                                    disabled={isApiBusy}
+                                    onClick={() => {
+                                      updateEditingDraft({ rating: star });
+                                      void handleInlineDishRatingUpdate(dish, star);
+                                    }}
+                                    className={`transition-colors ${filled ? "text-yellow-400" : "text-gray-300"} disabled:opacity-70 disabled:cursor-not-allowed`}
+                                    aria-label={`Set rating to ${star} out of 5`}
+                                  >
+                                    <Star size={22} fill="currentColor" />
+                                  </button>
+                                );
+                              })}
+                              <span className="ml-1 text-sm font-semibold text-gray-600">
+                                {editingDishDraft.rating}/5
+                              </span>
+                            </div>
                           </div>
                           <div>
                             <label className="block text-sm font-medium mb-1">
@@ -1335,8 +1603,9 @@ export default function RestaurantDetails() {
             style={{ WebkitOverflowScrolling: "touch" }}
           >
             <h3 className="text-lg font-bold mb-4">Add New Dish</h3>
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <fieldset
+            <form onSubmit={submitAddDishForm} className="space-y-4">
+              {!batchMode ? (
+                <fieldset
                 disabled={isApiBusy}
                 className="space-y-4 disabled:opacity-70"
               >
@@ -1538,6 +1807,105 @@ export default function RestaurantDetails() {
                           });
                         }}
                       />
+                      {newDishPhotos.length > 1 && (
+                        <div className="mt-3 flex items-center gap-3">
+                          <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={batchMode}
+                              onChange={toggleBatchMode}
+                            />
+                            Create separate dishes for each uploaded photo
+                          </label>
+                          {batchMode && (
+                            <div className="text-xs text-gray-500">
+                              Each photo will become its own dish entry.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {batchMode && newDishPhotos.length > 0 && (
+                        <div className="mt-4 space-y-4">
+                          {newDishPhotos.map((photo) => {
+                            const entry = batchEntries.find((b) => b.photoId === photo.id);
+                            return (
+                              <div key={photo.id} className="p-3 border rounded-xl bg-gray-50">
+                                <div className="flex gap-3">
+                                  <img src={photo.url} alt="preview" className="w-20 h-20 object-cover rounded-lg" />
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        value={entry?.name ?? ""}
+                                        onChange={(e) => updateBatchEntry(photo.id, { name: e.target.value })}
+                                        placeholder="Dish name"
+                                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl"
+                                      />
+                                    </div>
+                                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      <div>
+                                        <div className="text-xs font-medium mb-1">Rating</div>
+                                        <div className="flex gap-1">
+                                          {[1,2,3,4,5].map((s) => (
+                                            <button
+                                              key={s}
+                                              type="button"
+                                              onClick={() => updateBatchEntry(photo.id, { rating: s })}
+                                              className={`${(entry?.rating ?? 5) >= s ? "text-yellow-400" : "text-gray-300"}`}
+                                            >
+                                              <Star size={16} fill="currentColor" />
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <div className="text-xs font-medium mb-1">Actual Price (₹)</div>
+                                        <input
+                                          type="number"
+                                          value={entry?.actualPrice ?? ""}
+                                          onChange={(e) => updateBatchEntry(photo.id, { actualPrice: e.target.value })}
+                                          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="mt-2">
+                                      <textarea
+                                        rows={2}
+                                        value={entry?.review ?? ""}
+                                        onChange={(e) => updateBatchEntry(photo.id, { review: e.target.value })}
+                                        placeholder="Review / description"
+                                        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl"
+                                      />
+                                    </div>
+                                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      <div>
+                                        <select
+                                          value={entry?.cuisine ?? ""}
+                                          onChange={(e) => updateBatchEntry(photo.id, { cuisine: e.target.value })}
+                                          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl"
+                                        >
+                                          <option value="">Select cuisine</option>
+                                          {cuisineOptions.map((option) => (
+                                            <option key={option} value={option}>{option}</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                      <div>
+                                        <TagSelector
+                                          selectedTags={entry?.tags ?? []}
+                                          availableTags={flavorTags}
+                                          onChange={(tags) => updateBatchEntry(photo.id, { tags })}
+                                          onCreateTag={ensureFlavorTag}
+                                          placeholder="Tags"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1553,6 +1921,237 @@ export default function RestaurantDetails() {
                   Recommended dish
                 </label>
               </fieldset>
+              ) : (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-900">
+                    You picked separate dishes. Add a name and review for each photo, then save them as individual dishes.
+                    <button
+                      type="button"
+                      onClick={() => setBatchMode(false)}
+                      
+                      className="ml-2 font-semibold underline underline-offset-4"
+                    >
+                      Treat as one dish instead
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Dish Photos
+                    </label>
+                    <input
+                      ref={dishPhotoInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(event) =>
+                        handleAddDishPhotos(event.target.files)
+                      }
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => dishPhotoInputRef.current?.click()}
+                      disabled={isApiBusy}
+                      className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      <ImagePlus size={14} />
+                      Add more photos
+                    </button>
+                  </div>
+
+                  {newDishPhotos.length > 0 && (
+                    <div className="space-y-4">
+                      <PhotoCarousel
+                        photos={newDishPhotos}
+                        primaryPhotoId={resolvePrimaryPhotoId(
+                          newDishPhotos,
+                          newDishPrimaryPhotoId,
+                        )}
+                        editable
+                        onPrimaryChange={setNewDishPrimaryPhotoId}
+                        onRemovePhoto={(photoId) => {
+                          setNewDishPhotos((prev) => {
+                            const next = prev.filter(
+                              (photo) => photo.id !== photoId,
+                            );
+                            setNewDishPrimaryPhotoId((current) =>
+                              resolvePrimaryPhotoId(
+                                next,
+                                current === photoId ? undefined : current,
+                              ),
+                            );
+                            return next;
+                          });
+                        }}
+                      />
+
+                      {newDishPhotos.map((photo) => {
+                        const entry = batchEntries.find(
+                          (item) => item.photoId === photo.id,
+                        );
+                        return (
+                          <div
+                            key={photo.id}
+                            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                          >
+                            <div className="flex flex-col gap-4 sm:flex-row">
+                              <img
+                                src={photo.url}
+                                alt="Dish preview"
+                                className="h-24 w-24 rounded-2xl object-cover ring-1 ring-slate-200"
+                              />
+                              <div className="min-w-0 flex-1 space-y-3">
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                  <div>
+                                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">
+                                      Dish name
+                                    </label>
+                                    <input
+                                      value={entry?.name ?? ""}
+                                      onChange={(event) =>
+                                        updateBatchEntry(photo.id, {
+                                          name: event.target.value,
+                                        })
+                                      }
+                                      placeholder="Name this dish"
+                                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">
+                                      Review date
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={entry?.reviewDate ?? ""}
+                                      onChange={(event) =>
+                                        updateBatchEntry(photo.id, {
+                                          reviewDate: event.target.value,
+                                        })
+                                      }
+                                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">
+                                    Review
+                                  </label>
+                                  <textarea
+                                    rows={3}
+                                    value={entry?.review ?? ""}
+                                    onChange={(event) =>
+                                      updateBatchEntry(photo.id, {
+                                        review: event.target.value,
+                                      })
+                                    }
+                                    placeholder="Write a short review for this dish"
+                                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                                  />
+                                </div>
+
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                  <div>
+                                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">
+                                      Rating
+                                    </label>
+                                    <div className="flex gap-1.5">
+                                      {[1, 2, 3, 4, 5].map((star) => (
+                                        <button
+                                          type="button"
+                                          key={star}
+                                          onClick={() =>
+                                            updateBatchEntry(photo.id, {
+                                              rating: star,
+                                            })
+                                          }
+                                          className={`${(entry?.rating ?? 5) >= star ? "text-yellow-400" : "text-gray-300"}`}
+                                        >
+                                          <Star size={18} fill="currentColor" />
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">
+                                      Actual price
+                                    </label>
+                                    <input
+                                      type="number"
+                                      value={entry?.actualPrice ?? ""}
+                                      onChange={(event) =>
+                                        updateBatchEntry(photo.id, {
+                                          actualPrice: event.target.value,
+                                        })
+                                      }
+                                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">
+                                      Recommended
+                                    </label>
+                                    <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                      <input
+                                        type="checkbox"
+                                        checked={entry?.isRecommended ?? false}
+                                        onChange={(event) =>
+                                          updateBatchEntry(photo.id, {
+                                            isRecommended: event.target.checked,
+                                          })
+                                        }
+                                      />
+                                      Mark as recommended
+                                    </label>
+                                  </div>
+                                </div>
+
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                  <div>
+                                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">
+                                      Cuisine
+                                    </label>
+                                    <select
+                                      value={entry?.cuisine ?? ""}
+                                      onChange={(event) =>
+                                        updateBatchEntry(photo.id, {
+                                          cuisine: event.target.value,
+                                        })
+                                      }
+                                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                                    >
+                                      <option value="">Select cuisine</option>
+                                      {cuisineOptions.map((option) => (
+                                        <option key={option} value={option}>
+                                          {option}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <TagSelector
+                                      label="Tags"
+                                      selectedTags={entry?.tags ?? []}
+                                      availableTags={flavorTags}
+                                      onChange={(tags) =>
+                                        updateBatchEntry(photo.id, { tags })
+                                      }
+                                      onCreateTag={ensureFlavorTag}
+                                      placeholder="Type to search or add"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {addDishError && (
                 <p className="text-sm text-red-600 font-medium">
@@ -1568,6 +2167,10 @@ export default function RestaurantDetails() {
                     setShowAddDish(false);
                     setAddDishError(null);
                     setDishNameDuplicateError(null);
+                    setUploadChoiceOpen(false);
+                    setPendingDishFiles([]);
+                    setBatchEntries([]);
+                    setBatchMode(false);
                   }}
                   className="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
@@ -1581,7 +2184,7 @@ export default function RestaurantDetails() {
                   {isSavingDish ? (
                     <Loader2 size={16} className="animate-spin" />
                   ) : null}
-                  {isSavingDish ? "Saving..." : "Save Dish"}
+                  {isSavingDish ? "Saving..." : batchMode ? "Create Dishes" : "Save Dish"}
                 </button>
               </div>
             </form>
@@ -1589,13 +2192,81 @@ export default function RestaurantDetails() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {uploadChoiceOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[1300] flex items-start justify-center overflow-y-auto bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-8"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.98 }}
+              transition={{ type: "spring", stiffness: 260, damping: 24 }}
+              className="flex w-full max-w-lg flex-col overflow-hidden rounded-[24px] border border-white/20 bg-white shadow-[0_30px_100px_rgba(15,23,42,0.35)] sm:rounded-[28px] max-h-[calc(100dvh-2rem)] sm:max-h-[min(90dvh,48rem)]"
+            >
+              <div className="bg-gradient-to-br from-amber-400 via-orange-500 to-rose-500 px-5 py-5 text-white sm:px-6">
+                <div className="inline-flex items-center gap-2 rounded-full bg-white/20 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.25em] sm:text-xs">
+                  <ImagePlus size={12} />
+                  Photo import
+                </div>
+                <h3 className="mt-4 text-xl font-black tracking-tight sm:text-2xl">
+                  How should these photos be saved?
+                </h3>
+                <p className="mt-2 max-w-md text-sm leading-6 text-white/90">
+                  Choose whether the selected images belong to one dish or should become separate dishes with their own names and reviews.
+                </p>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-4 px-5 py-5 sm:px-6">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => void applyPendingDishFiles(false)}
+                    className="group rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white active:scale-[0.99]"
+                  >
+                    <div className="text-sm font-bold text-slate-900">Same dish</div>
+                    <div className="mt-2 text-sm leading-6 text-slate-600">
+                      All selected photos attach to one dish.
+                    </div>
+                    <div className="mt-4 inline-flex rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
+                      One form
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void applyPendingDishFiles(true)}
+                    className="group rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-amber-300 hover:from-amber-100 hover:to-orange-100 active:scale-[0.99]"
+                  >
+                    <div className="text-sm font-bold text-amber-950">Separate dishes</div>
+                    <div className="mt-2 text-sm leading-6 text-amber-900/80">
+                      Each photo becomes its own dish card with a review.
+                    </div>
+                    <div className="mt-4 inline-flex rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white shadow-sm">
+                      Multi form
+                    </div>
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={closeUploadChoiceModal}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.99]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {editMode && !showAddDish && (
         <button
-          onClick={() => {
-            setShowAddDish(true);
-            setAddDishError(null);
-            setDishNameDuplicateError(null);
-          }}
+          onClick={() => openAddAndPick()}
           disabled={isApiBusy}
           className="fixed bottom-6 right-6 bg-black hover:bg-gray-800 text-white rounded-full p-4 shadow-2xl active:scale-95 transition-transform flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
         >

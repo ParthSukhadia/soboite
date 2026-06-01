@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMapEvents, useMap } from 'react-leaflet';
 import { useStore } from '../store/useStore';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, X, Star, Utensils, SlidersHorizontal, RotateCcw, ImagePlus, Loader2 } from 'lucide-react';
 import L from 'leaflet';
@@ -186,7 +186,6 @@ export default function MapPage() {
     ensureFlavorTag,
     setNetworkBusy
   } = useStore();
-  const [selectedRest, setSelectedRest] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [latLng, setLatLng] = useState<{lat: number, lng: number} | null>(null);
   const [currentPosition, setCurrentPosition] = useState<L.LatLng | null>(null);
@@ -277,6 +276,18 @@ export default function MapPage() {
   const [draggingDishPhotoId, setDraggingDishPhotoId] = useState<string | null>(null);
   const isApiBusy = loading || isSavingRestaurant;
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedRest = searchParams.get('restaurant');
+
+  const setSelectedRest = (restaurantId: string | null) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (restaurantId) {
+      nextParams.set('restaurant', restaurantId);
+    } else {
+      nextParams.delete('restaurant');
+    }
+    setSearchParams(nextParams, { replace: true });
+  };
 
   useEffect(() => {
     let active = true;
@@ -299,19 +310,28 @@ export default function MapPage() {
   }, [fetchData]);
 
   const ratingsByRestaurant = useMemo(() => {
-    const totals = new Map<string, { sum: number; count: number }>();
+    const dishTotals = new Map<string, { sum: number; count: number }>();
     dishes.forEach((dish) => {
-      const current = totals.get(dish.restaurantId) ?? { sum: 0, count: 0 };
-      totals.set(dish.restaurantId, { sum: current.sum + dish.rating, count: current.count + 1 });
+      const current = dishTotals.get(dish.restaurantId) ?? { sum: 0, count: 0 };
+      dishTotals.set(dish.restaurantId, { sum: current.sum + dish.rating, count: current.count + 1 });
     });
 
     const result = new Map<string, number>();
-    totals.forEach((value, key) => {
-      const avg = value.count > 0 ? value.sum / value.count : 0;
-      result.set(key, Math.round(avg * 10) / 10);
+    restaurants.forEach((restaurant) => {
+      const dishAverage = dishTotals.has(restaurant.id)
+        ? dishTotals.get(restaurant.id)!.sum / dishTotals.get(restaurant.id)!.count
+        : undefined;
+      const combinedValues = [restaurant.ambienceRating, restaurant.serviceRating, dishAverage].filter(
+        (value): value is number => typeof value === 'number' && Number.isFinite(value)
+      );
+      if (combinedValues.length === 0) {
+        return;
+      }
+      const avg = combinedValues.reduce((sum, value) => sum + value, 0) / combinedValues.length;
+      result.set(restaurant.id, Math.round(avg * 10) / 10);
     });
     return result;
-  }, [dishes]);
+  }, [dishes, restaurants]);
 
   const typeOptions = useMemo(() => {
     const values = [...restaurantTypes, ...restaurants.map((r) => r.type).filter((v): v is string => Boolean(v))];
