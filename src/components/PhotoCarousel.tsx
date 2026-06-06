@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Star, Trash2, ImageOff } from 'lucide-react';
+import CachedImage from './CachedImage';
 import { PhotoEntry } from '../types';
 
 interface PhotoCarouselProps {
@@ -235,7 +236,7 @@ if (safePhotos.length > 1 && scale <= 1.02 && Math.abs(deltaX) > 40 && Math.abs(
             <ImageOff size={48} />
           </div>
         ) : (
-          <img
+          <CachedImage
             src={activePhoto.url}
             alt="Photo"
             className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none"

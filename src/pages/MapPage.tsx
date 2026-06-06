@@ -9,6 +9,43 @@ import { Restaurant } from '../types';
 import { optimizeImage } from '../lib/imageOptimization';
 import TagSelector from '../components/TagSelector';
 import PriceLevelIcon from '../components/PriceLevelIcon';
+import CachedImage from '../components/CachedImage';
+
+type PinLatLng = { lat: number; lng: number };
+
+const parseLatLngNumber = (raw: unknown): number | null => {
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? raw : null;
+  }
+
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed === '') return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const normalizePinLatLng = (value: { lat: unknown; lng: unknown } | L.LatLng | null | undefined): PinLatLng | null => {
+  if (!value) return null;
+
+  const lat = parseLatLngNumber(value.lat);
+  const lng = parseLatLngNumber(value.lng);
+  if (lat === null || lng === null) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+
+  return { lat, lng };
+};
+
+const safeLatLng = (value: { lat: unknown; lng: unknown } | L.LatLng | null | undefined): L.LatLng | null => {
+  const normalized = normalizePinLatLng(value);
+  return normalized ? L.latLng(normalized.lat, normalized.lng) : null;
+};
+
+const hasValidRestaurantCoordinates = (restaurant: Restaurant) =>
+  normalizePinLatLng({ lat: restaurant.lat, lng: restaurant.lng }) !== null;
 
 function LocationMarker({ onLocation }: { onLocation?: (pos: L.LatLng) => void }) {
   const [position, setPosition] = useState<L.LatLng | null>(null);
@@ -16,14 +53,15 @@ function LocationMarker({ onLocation }: { onLocation?: (pos: L.LatLng) => void }
   const map = useMap();
 
   useEffect(() => {
-    if (!navigator.geolocation) {
-      console.error('Geolocation is not supported by this browser.');
+    if (!navigator.geolocation || !window.isSecureContext) {
+      console.error('Geolocation is not supported or allowed in this browser/environment.');
       return;
     }
 
     let hasCentered = false;
     const handleSuccess = (geo: GeolocationPosition) => {
-      const next = L.latLng(geo.coords.latitude, geo.coords.longitude);
+      const next = safeLatLng({ lat: geo.coords.latitude, lng: geo.coords.longitude });
+      if (!next) return;
       setPosition(next);
       onLocation?.(next);
       if (!hasCentered) {
@@ -94,13 +132,43 @@ function MapClickHandler({ onClick }: { onClick: (e: any) => void }) {
   return null;
 }
 
+function MapViewportUpdater({ center }: { center: L.LatLng | null }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!center || !Number.isFinite(center.lat) || !Number.isFinite(center.lng)) return;
+    const normalizedCenter = safeLatLng(center);
+    if (!normalizedCenter) return;
+    map.flyTo(normalizedCenter, Math.max(map.getZoom(), 15), {
+      animate: true,
+      duration: 0.6,
+      easeLinearity: 0.25,
+    });
+  }, [center, map]);
+
+  return null;
+}
+
+function MapContainerResizeFixer({ trigger }: { trigger: unknown }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      map.invalidateSize({ animate: false });
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [map, trigger]);
+
+  return null;
+}
+
 function SelectedRestaurantFlyTo({ restaurant }: { restaurant?: Restaurant | null }) {
   const map = useMap();
 
   useEffect(() => {
     if (!restaurant) return;
-    if (typeof restaurant.lat !== 'number' || typeof restaurant.lng !== 'number' || isNaN(restaurant.lat) || isNaN(restaurant.lng)) return;
-    const target = L.latLng(restaurant.lat, restaurant.lng);
+    const target = safeLatLng({ lat: restaurant.lat, lng: restaurant.lng });
+    if (!target) return;
     const nextZoom = Math.max(map.getZoom(), 16);
     map.flyTo(target, nextZoom, {
       animate: true,
@@ -187,7 +255,7 @@ export default function MapPage() {
     setNetworkBusy
   } = useStore();
   const [showAddForm, setShowAddForm] = useState(false);
-  const [latLng, setLatLng] = useState<{lat: number, lng: number} | null>(null);
+  const [latLng, setLatLng] = useState<PinLatLng | null>(null);
   const [currentPosition, setCurrentPosition] = useState<L.LatLng | null>(null);
   const [addStep, setAddStep] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
@@ -208,6 +276,7 @@ export default function MapPage() {
   const [isSavingRestaurant, setIsSavingRestaurant] = useState(false);
   const [isBootstrappingData, setIsBootstrappingData] = useState(true);
   const [addFormError, setAddFormError] = useState<string | null>(null);
+  const locationMapRef = useRef<HTMLDivElement | null>(null);
   // Controlled inputs for step 3 (persisted to sessionStorage so switching apps doesn't lose data)
   const [newRestName, setNewRestName] = useState(() => sessionStorage.getItem('draft_restName') ?? '');
   const [newRestNotes, setNewRestNotes] = useState(() => sessionStorage.getItem('draft_restNotes') ?? '');
@@ -233,6 +302,8 @@ export default function MapPage() {
   const cardContainerRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const scrollTimeoutRef = useRef<number | null>(null);
+  const ignoreCarouselSelectionRef = useRef(false);
+  const ignoreCarouselSelectionTimeoutRef = useRef<number | null>(null);
   const restaurantPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const dishPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const restaurantPhotoPreviewRef = useRef<HTMLDivElement | null>(null);
@@ -278,6 +349,44 @@ export default function MapPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedRest = searchParams.get('restaurant');
+  const validPinLatLng = normalizePinLatLng(latLng);
+  const validCurrentPosition = normalizePinLatLng(currentPosition);
+
+  const setLatLngSafely = (
+    value: { lat: unknown; lng: unknown } | L.LatLng | null,
+    invalidMessage = 'Could not use that pin location. Please tap the map again.'
+  ) => {
+    if (value === null) {
+      setLatLng(null);
+      return;
+    }
+
+    const normalized = normalizePinLatLng(value);
+    if (!normalized) {
+      setLatLng(null);
+      setAddFormError(invalidMessage);
+      return;
+    }
+
+    setAddFormError(null);
+    setLatLng(normalized);
+  };
+
+  const temporarilyIgnoreCarouselSelection = () => {
+    ignoreCarouselSelectionRef.current = true;
+    if (ignoreCarouselSelectionTimeoutRef.current !== null) {
+      window.clearTimeout(ignoreCarouselSelectionTimeoutRef.current);
+    }
+    ignoreCarouselSelectionTimeoutRef.current = window.setTimeout(() => {
+      ignoreCarouselSelectionRef.current = false;
+      ignoreCarouselSelectionTimeoutRef.current = null;
+    }, 450);
+  };
+
+  const handleMarkerSelect = (restaurantId: string | null) => {
+    temporarilyIgnoreCarouselSelection();
+    setSelectedRest(restaurantId);
+  };
 
   const setSelectedRest = (restaurantId: string | null) => {
     const nextParams = new URLSearchParams(searchParams);
@@ -459,7 +568,15 @@ export default function MapPage() {
       if (!res.ok) throw new Error('Network request failed');
       const data = await res.json();
       if (data && data.length > 0) {
-        setLatLng({ lat: Number(data[0].lat), lng: Number(data[0].lon) });
+        const nextLatLng = normalizePinLatLng({ lat: data[0].lat, lng: data[0].lon });
+        if (!nextLatLng) {
+          setAddFormError('Could not read location coordinates. Try a more specific address.');
+          return;
+        }
+        setLatLngSafely(nextLatLng, 'Could not use coordinates from this address. Try a more specific address.');
+        window.requestAnimationFrame(() => {
+          locationMapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
       } else {
         setAddFormError('Could not find location for this address. Try a more specific address.');
       }
@@ -468,13 +585,6 @@ export default function MapPage() {
     } finally {
       setIsGeocodingAddress(false);
     }
-  };
-
-  const handleFormFocusCapture = (event: React.FocusEvent<HTMLFormElement>) => {
-    const target = event.target as HTMLElement;
-    window.setTimeout(() => {
-      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }, 120);
   };
 
   const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
@@ -1039,8 +1149,13 @@ export default function MapPage() {
 
   const handleMapClick = (e: any) => {
     if (editMode && showAddForm) {
-      setLatLng(e.latlng);
-    } else if (!showAddForm) {
+      if (e?.latlng) {
+        setLatLngSafely(e.latlng);
+      }
+      return;
+    }
+
+    if (!showAddForm) {
       setSelectedRest(null);
     }
   };
@@ -1082,8 +1197,9 @@ export default function MapPage() {
       setNetworkBusy(true);
       setAddFormError(null);
       const restaurantId = createId();
-      const resolvedLatLng = latLng
-        ?? (currentPosition ? { lat: currentPosition.lat, lng: currentPosition.lng } : { lat: 18.9442, lng: 72.8276 });
+      const resolvedLatLng = validPinLatLng
+        ?? validCurrentPosition
+        ?? { lat: 18.9442, lng: 72.8276 };
       const positionedRestaurantPhoto = restaurantPhoto ? await buildPositionedRestaurantPhoto() : undefined;
 
       if (type) {
@@ -1169,6 +1285,9 @@ export default function MapPage() {
       if (scrollTimeoutRef.current !== null) {
         window.clearTimeout(scrollTimeoutRef.current);
       }
+      if (ignoreCarouselSelectionTimeoutRef.current !== null) {
+        window.clearTimeout(ignoreCarouselSelectionTimeoutRef.current);
+      }
       if (restaurantPhotoRafRef.current !== null) {
         window.cancelAnimationFrame(restaurantPhotoRafRef.current);
       }
@@ -1181,6 +1300,10 @@ export default function MapPage() {
   }, []);
 
   const handleCardScroll = () => {
+    if (ignoreCarouselSelectionRef.current) {
+      return;
+    }
+
     if (scrollTimeoutRef.current !== null) {
       window.clearTimeout(scrollTimeoutRef.current);
     }
@@ -1458,21 +1581,27 @@ export default function MapPage() {
           url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
         />
 
-        <LocationMarker onLocation={setCurrentPosition} />
+        <LocationMarker onLocation={(position) => {
+          const normalized = normalizePinLatLng(position);
+          if (!normalized) {
+            return;
+          }
+          setCurrentPosition(L.latLng(normalized.lat, normalized.lng));
+        }} />
         <SelectedRestaurantFlyTo restaurant={activeRest} />
         <MapClickHandler onClick={handleMapClick} />
-        {restaurants.filter(r => typeof r.lat === 'number' && typeof r.lng === 'number' && !isNaN(r.lat) && !isNaN(r.lng)).map(rest => (
+        {restaurants.filter(hasValidRestaurantCoordinates).map(rest => (
           <RestaurantMarker 
             key={rest.id} 
             restaurant={rest}
             rating={ratingsByRestaurant.get(rest.id)}
             isDim={!matchesFilters(rest)}
             isSelected={rest.id === selectedRest}
-            onClick={setSelectedRest}
+            onClick={handleMarkerSelect}
           />
         ))}
-        {latLng && showAddForm && editMode && (
-          <Marker position={[latLng.lat, latLng.lng]} opacity={0.5} />
+        {validPinLatLng && showAddForm && editMode && (
+          <Marker position={[validPinLatLng.lat, validPinLatLng.lng]} opacity={0.5} />
         )}
       </MapContainer>
 
@@ -1523,10 +1652,10 @@ export default function MapPage() {
                     >
                       <div className="relative h-full">
                         {rest.imageUrl ? (
-                          <img 
-                            src={rest.imageUrl} 
-                            alt={rest.name} 
-                            className="w-full h-full object-cover" 
+                          <CachedImage
+                            src={rest.imageUrl}
+                            alt={rest.name}
+                            className="w-full h-full object-cover"
                             onError={(e) => { e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3Crect width='1' height='1' fill='%23e5e7eb'/%3E%3C/svg%3E"; }}
                           />
                         ) : (
@@ -1600,7 +1729,7 @@ export default function MapPage() {
               <button disabled={isApiBusy} onClick={closeAddForm} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"><X size={20} /></button>
             </div>
             
-            <form onSubmit={handleAddSubmit} onFocusCapture={handleFormFocusCapture} className="space-y-4 pb-24">
+            <form onSubmit={handleAddSubmit} className="space-y-4 pb-24">
               <fieldset disabled={isApiBusy} className="space-y-4 disabled:opacity-70">
               <div className={addStep === 1 ? '' : 'hidden'}>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Upload Restaurant Photo</label>
@@ -1631,7 +1760,7 @@ export default function MapPage() {
                     onTouchMove={handleRestaurantPhotoTouchMove}
                     onTouchEnd={handleRestaurantPhotoTouchEnd}
                   >
-                    <img
+                    <CachedImage
                       src={restaurantPhoto}
                       alt="Restaurant preview"
                       className="w-full h-full object-cover pointer-events-none select-none"
@@ -1698,8 +1827,8 @@ export default function MapPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (currentPosition) {
-                          setLatLng({ lat: currentPosition.lat, lng: currentPosition.lng });
+                        if (validCurrentPosition) {
+                          setLatLngSafely(validCurrentPosition);
                         }
                       }}
                       className="flex-1 bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200 text-sm"
@@ -1715,13 +1844,40 @@ export default function MapPage() {
                     </button>
                   </div>
 
-                  {!latLng ? (
+                  <div ref={locationMapRef} className="h-72 overflow-hidden rounded-2xl border border-gray-200 bg-gray-100">
+                    <MapContainer
+                      center={validPinLatLng ? [validPinLatLng.lat, validPinLatLng.lng] : validCurrentPosition ? [validCurrentPosition.lat, validCurrentPosition.lng] : [18.9442, 72.8276]}
+                      zoom={15}
+                      className="h-full w-full"
+                      attributionControl={false}
+                    >
+                      <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+                      <MapClickHandler onClick={(event) => setLatLngSafely(event.latlng)} />
+                      <MapViewportUpdater center={validPinLatLng ? safeLatLng(validPinLatLng) : (validCurrentPosition ? safeLatLng(validCurrentPosition) : null)} />
+                      <MapContainerResizeFixer trigger={validPinLatLng ? `${validPinLatLng.lat}-${validPinLatLng.lng}` : validCurrentPosition ? `${validCurrentPosition.lat}-${validCurrentPosition.lng}` : 'default'} />
+                      {validPinLatLng && (
+                        <Marker
+                          position={[validPinLatLng.lat, validPinLatLng.lng]}
+                          draggable
+                          eventHandlers={{
+                            dragend: (event) => {
+                              const marker = event.target;
+                              const nextLatLng = marker.getLatLng();
+                              setLatLngSafely({ lat: nextLatLng.lat, lng: nextLatLng.lng });
+                            }
+                          }}
+                        />
+                      )}
+                    </MapContainer>
+                  </div>
+
+                  {!validPinLatLng ? (
                     <div className="p-3 bg-orange-50 border border-orange-200 text-orange-600 rounded-xl text-center text-sm">
                       No pin selected. You can skip and we will use your current/default location.
                     </div>
                   ) : (
                     <div className="p-3 bg-green-50 border border-green-200 text-green-700 rounded-xl text-center text-sm">
-                      📍 Pin set at {latLng.lat.toFixed(5)}, {latLng.lng.toFixed(5)}
+                      📍 Pin set at {validPinLatLng.lat.toFixed(5)}, {validPinLatLng.lng.toFixed(5)}
                     </div>
                   )}
                 </div>
@@ -1878,7 +2034,7 @@ export default function MapPage() {
                                     onTouchMove={(event) => handleDishPhotoTouchMove(dish.id, event)}
                                     onTouchEnd={(event) => handleDishPhotoTouchEnd(dish.id, event)}
                                   >
-                                    <img
+                                    <CachedImage
                                       src={dish.imageUrl}
                                       alt="Dish"
                                       className="w-full h-full object-cover pointer-events-none select-none"

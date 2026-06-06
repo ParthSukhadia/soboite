@@ -3,6 +3,8 @@ import MainLayout from './layout/MainLayout';
 import MapPage from './pages/MapPage';
 import RestaurantDetails from './pages/RestaurantDetails';
 import RestaurantFormPage from './pages/RestaurantFormPage';
+import RecommendedDishesPage from './pages/RecommendedDishesPage';
+import TopPicksPage from './pages/TopPicksPage';
 import { useStore } from './store/useStore';
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -18,6 +20,8 @@ export default function App() {
       <Routes>
         <Route element={<ErrorBoundary><MainLayout /></ErrorBoundary>}>
           <Route path="/" element={<MapPage />} />
+          <Route path="/recommended" element={<RecommendedDishesPage />} />
+          <Route path="/top-picks" element={<TopPicksPage />} />
           <Route path="/restaurant/new" element={<ProtectedRoute><RestaurantFormPage /></ProtectedRoute>} />
           <Route path="/restaurant/:id/edit" element={<ProtectedRoute><RestaurantFormPage /></ProtectedRoute>} />
           <Route path="/restaurant/:id" element={<RestaurantDetails />} />

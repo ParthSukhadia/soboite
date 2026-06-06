@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Restaurant, Dish, DishReview, PhotoEntry } from '../types';
 import { supabase, uploadImage } from '../lib/supabase';
+import { prefetchCachedImages } from '../lib/imageCache';
 import { indexedDBStorage } from './indexedDBStorage';
 
 const isValidReviewDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -100,6 +101,32 @@ const resolvePrimaryPhotoUrl = (photos: PhotoEntry[], primaryPhotoId?: string, f
   }
   if (photos[0]) return photos[0].url;
   return fallbackUrl;
+};
+
+const collectImageUrls = (restaurants: Restaurant[], dishes: Dish[]) => {
+  const urls = new Set<string>();
+
+  restaurants.forEach((restaurant) => {
+    if (restaurant.imageUrl) urls.add(restaurant.imageUrl);
+    restaurant.photos?.forEach((photo) => {
+      if (photo.url) urls.add(photo.url);
+    });
+  });
+
+  dishes.forEach((dish) => {
+    if (dish.imageUrl) urls.add(dish.imageUrl);
+    dish.photos?.forEach((photo) => {
+      if (photo.url) urls.add(photo.url);
+    });
+  });
+
+  return Array.from(urls);
+};
+
+const cacheImageUrlsForState = async (restaurants: Restaurant[], dishes: Dish[]) => {
+  const urls = collectImageUrls(restaurants, dishes);
+  if (urls.length === 0) return;
+  await prefetchCachedImages(urls);
 };
 
 const normalizeReviews = (
@@ -245,7 +272,7 @@ let activeFetchPromise: Promise<void> | null = null;
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
-      editMode: true,
+      editMode: false,
       setEditMode: (mode) => set({ editMode: mode }),
 
       hydrated: false,
@@ -438,6 +465,8 @@ export const useStore = create<AppState>()(
             flavorTags: uniqueSorted(tableFlavorTags.length > 0 ? tableFlavorTags : derivedFlavorTags),
             lastFetch: Date.now()
           });
+
+          void cacheImageUrlsForState(mappedRests, mappedDishes);
         } catch (error) {
           console.error("Error fetching data:", error);
         } finally {
@@ -485,41 +514,41 @@ export const useStore = create<AppState>()(
         return;
       }
 
-      set((state) => {
-        const updatedRests = state.restaurants.map((r) => {
-          if (r.id !== restaurantId) return r;
-          const photos = normalizePhotos(restRes.data.photos, restRes.data.image_url);
-          const primaryPhotoId = resolvePrimaryPhotoId(photos, restRes.data.primary_photo_id);
-          const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, restRes.data.image_url);
-          return {
-            ...r,
-            photos: photos.length > 0 ? photos : undefined,
-            primaryPhotoId,
-            imageUrl
-          };
-        });
-
-        const dishData = dishRes.data || [];
-        const updatedDishes = state.dishes.map((d) => {
-          if (d.restaurantId !== restaurantId) return d;
-          const matched = dishData.find((dbDish) => dbDish.id === d.id);
-          if (!matched) return d;
-          const photos = normalizePhotos(matched.photos, matched.image_url);
-          const primaryPhotoId = resolvePrimaryPhotoId(photos, matched.primary_photo_id);
-          const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, matched.image_url);
-          return {
-            ...d,
-            photos: photos.length > 0 ? photos : undefined,
-            primaryPhotoId,
-            imageUrl
-          };
-        });
-
+      const updatedRests = state.restaurants.map((r) => {
+        if (r.id !== restaurantId) return r;
+        const photos = normalizePhotos(restRes.data.photos, restRes.data.image_url);
+        const primaryPhotoId = resolvePrimaryPhotoId(photos, restRes.data.primary_photo_id);
+        const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, restRes.data.image_url);
         return {
-          restaurants: updatedRests,
-          dishes: updatedDishes
+          ...r,
+          photos: photos.length > 0 ? photos : undefined,
+          primaryPhotoId,
+          imageUrl
         };
       });
+
+      const dishData = dishRes.data || [];
+      const updatedDishes = state.dishes.map((d) => {
+        if (d.restaurantId !== restaurantId) return d;
+        const matched = dishData.find((dbDish) => dbDish.id === d.id);
+        if (!matched) return d;
+        const photos = normalizePhotos(matched.photos, matched.image_url);
+        const primaryPhotoId = resolvePrimaryPhotoId(photos, matched.primary_photo_id);
+        const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, matched.image_url);
+        return {
+          ...d,
+          photos: photos.length > 0 ? photos : undefined,
+          primaryPhotoId,
+          imageUrl
+        };
+      });
+
+      set({
+        restaurants: updatedRests,
+        dishes: updatedDishes
+      });
+
+      void cacheImageUrlsForState(updatedRests, updatedDishes);
     },
 
     addRestaurant: async (restaurant) => {

@@ -1,18 +1,49 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Marker, TileLayer, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { ArrowLeft, Loader2, LocateFixed } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 
+const parseLatLngNumber = (raw: unknown): number | null => {
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? raw : null;
+  }
+
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed === '') return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const toValidLatLng = (value: { lat: unknown; lng: unknown } | L.LatLng | null | undefined): L.LatLng | null => {
+  if (!value) return null;
+
+  const lat = parseLatLngNumber(value.lat);
+  const lng = parseLatLngNumber(value.lng);
+  if (lat === null || lng === null) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+
+  return L.latLng(lat, lng);
+};
+
 function MapClickHandler({ onPick }: { onPick: (latlng: L.LatLng) => void }) {
-  useMapEvents({ click: (event) => onPick(event.latlng) });
+  useMapEvents({ click: (event) => {
+    if (event?.latlng) {
+      onPick(event.latlng);
+    }
+  }});
   return null;
 }
 
 function MapUpdater({ center }: { center: L.LatLng }) {
   const map = useMap();
   useEffect(() => {
+    if (!Number.isFinite(center.lat) || !Number.isFinite(center.lng)) return;
     map.flyTo(center, map.getZoom());
   }, [center, map]);
   return null;
@@ -50,7 +81,15 @@ const getPreciseCurrentLocation = () => new Promise<L.LatLng>((resolve, reject) 
 
   navigator.geolocation.getCurrentPosition(
     (position) => {
-      resolve(L.latLng(position.coords.latitude, position.coords.longitude));
+      const normalized = toValidLatLng({
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      });
+      if (!normalized) {
+        reject(new Error('Received invalid GPS coordinates.'));
+        return;
+      }
+      resolve(normalized);
     },
     (error) => {
       reject(new Error(error.message));
@@ -98,6 +137,25 @@ export default function RestaurantFormPage() {
   const [isLocating, setIsLocating] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const locationMapRef = useRef<HTMLDivElement | null>(null);
+
+  const setLatLngSafely = (
+    value: { lat: unknown; lng: unknown } | L.LatLng | null,
+    invalidMessage = 'Invalid map coordinates received. Please try again.'
+  ) => {
+    if (value === null) {
+      setLatLng(null);
+      return;
+    }
+    const normalized = toValidLatLng(value);
+    if (!normalized) {
+      setLatLng(null);
+      setError(invalidMessage);
+      return;
+    }
+    setError(null);
+    setLatLng(normalized);
+  };
 
   const isBusy = loading || isSaving || isLocating || isGeocoding;
 
@@ -141,9 +199,14 @@ export default function RestaurantFormPage() {
     setAddress(restaurant.address ?? '');
     setCostForTwo(typeof restaurant.costForTwo === 'number' ? String(restaurant.costForTwo) : '');
     setVegOnly(Boolean(restaurant.vegOnly));
-    const position = L.latLng(restaurant.lat, restaurant.lng);
-    setLatLng(position);
-    setInitialMapCenter(position);
+    const position = toValidLatLng({ lat: restaurant.lat, lng: restaurant.lng });
+    if (position) {
+      setLatLng(position);
+      setInitialMapCenter(position);
+    } else {
+      setLatLng(null);
+      setInitialMapCenter(L.latLng(18.9442, 72.8276));
+    }
   }, [isEditMode, restaurant]);
 
   const handleUseCurrentLocation = async () => {
@@ -151,7 +214,7 @@ export default function RestaurantFormPage() {
     setIsLocating(true);
     try {
       const precise = await getPreciseCurrentLocation();
-      setLatLng(precise);
+      setLatLngSafely(precise, 'Unable to use GPS location. Please pin manually.');
       setInitialMapCenter(precise);
     } catch (locationError) {
       setError(locationError instanceof Error ? locationError.message : 'Unable to fetch current location.');
@@ -174,9 +237,16 @@ export default function RestaurantFormPage() {
       const data = await res.json();
       if (data && data.length > 0) {
         const result = data[0];
-        const newPos = L.latLng(Number(result.lat), Number(result.lon));
-        setLatLng(newPos);
+        const newPos = toValidLatLng({ lat: result.lat, lng: result.lon });
+        if (!newPos) {
+          setError('Could not use coordinates from this address. Try a more specific address.');
+          return;
+        }
+        setLatLngSafely(newPos);
         setInitialMapCenter(newPos);
+        window.requestAnimationFrame(() => {
+          locationMapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
       } else {
         setError('Could not find location for this address.');
       }
@@ -445,19 +515,35 @@ export default function RestaurantFormPage() {
                 </div>
               </div>
               <div className="h-72 overflow-hidden rounded-2xl border border-gray-200">
-                <MapContainer
-                  center={[initialMapCenter.lat, initialMapCenter.lng]}
-                  zoom={15}
-                  className="h-full w-full"
-                >
-                  <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
-                  <MapClickHandler onPick={setLatLng} />
-                  <MapUpdater center={initialMapCenter} />
-                  {latLng && <Marker position={[latLng.lat, latLng.lng]} />}
-                </MapContainer>
+                <div ref={locationMapRef} className="h-full w-full">
+                  <MapContainer
+                    center={Number.isFinite(initialMapCenter.lat) && Number.isFinite(initialMapCenter.lng)
+                      ? [initialMapCenter.lat, initialMapCenter.lng]
+                      : [18.9442, 72.8276]}
+                    zoom={15}
+                    className="h-full w-full"
+                  >
+                    <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+                    <MapClickHandler onPick={(picked) => setLatLngSafely(picked)} />
+                    <MapUpdater center={initialMapCenter} />
+                    {latLng && (
+                      <Marker
+                        position={[latLng.lat, latLng.lng]}
+                        draggable
+                        eventHandlers={{
+                          dragend: (event) => {
+                            const marker = event.target;
+                            const nextLatLng = marker.getLatLng();
+                            setLatLngSafely(nextLatLng);
+                          }
+                        }}
+                      />
+                    )}
+                  </MapContainer>
+                </div>
               </div>
               <p className="text-xs text-gray-500">
-                Tap on the map to drop/redrop your pin. {latLng ? `Current pin: ${latLng.lat.toFixed(6)}, ${latLng.lng.toFixed(6)}` : 'No pin selected yet.'}
+                Tap on the map or drag the pin to fine-tune the location. {latLng ? `Current pin: ${latLng.lat.toFixed(6)}, ${latLng.lng.toFixed(6)}` : 'No pin selected yet.'}
               </p>
             </div>
           </fieldset>

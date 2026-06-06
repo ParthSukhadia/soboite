@@ -16,6 +16,7 @@ import { z } from "zod";
 import TagSelector from "../components/TagSelector";
 import PriceLevelIcon from "../components/PriceLevelIcon";
 import PhotoCarousel from "../components/PhotoCarousel";
+import CachedImage from "../components/CachedImage";
 import { useStore } from "../store/useStore";
 import { Dish, DishReview, PhotoEntry } from "../types";
 import { optimizeImage } from "../lib/imageOptimization";
@@ -1831,7 +1832,7 @@ export default function RestaurantDetails() {
                             return (
                               <div key={photo.id} className="p-3 border rounded-xl bg-gray-50">
                                 <div className="flex gap-3">
-                                  <img src={photo.url} alt="preview" className="w-20 h-20 object-cover rounded-lg" />
+                                  <CachedImage src={photo.url} alt="preview" className="w-20 h-20 object-cover rounded-lg" />
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2">
                                       <input
@@ -1996,7 +1997,7 @@ export default function RestaurantDetails() {
                             className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
                           >
                             <div className="flex flex-col gap-4 sm:flex-row">
-                              <img
+                              <CachedImage
                                 src={photo.url}
                                 alt="Dish preview"
                                 className="h-24 w-24 rounded-2xl object-cover ring-1 ring-slate-200"

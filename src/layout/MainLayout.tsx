@@ -1,6 +1,6 @@
 import { useRef, useState, FormEvent, useEffect } from 'react';
-import { Outlet, Link } from 'react-router-dom';
-import { DatabaseZap, Download, Settings2, Upload, LogIn, LogOut, Lock, X, Eye, EyeOff, Loader2, RotateCw } from 'lucide-react';
+import { Outlet, Link, useLocation } from 'react-router-dom';
+import { DatabaseZap, Download, Settings2, Upload, LogIn, LogOut, Lock, X, Menu, Eye, EyeOff, Loader2, RotateCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
 
@@ -105,6 +105,7 @@ export default function MainLayout() {
     deleteDishFromState
   } = useStore();
   const [showSettings, setShowSettings] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState(false);
@@ -113,6 +114,12 @@ export default function MainLayout() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const importFileRef = useRef<HTMLInputElement | null>(null);
+  const location = useLocation();
+  const currentPath = location.pathname;
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [location.pathname, location.search]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -337,122 +344,242 @@ export default function MainLayout() {
   return (
     <div className="flex flex-col h-dvh overflow-hidden">
       <header className="bg-white border-b border-gray-200 shadow-sm z-[3000] px-4 py-3 flex justify-between items-center relative">
-        <Link to="/" className="inline-flex items-center gap-2.5 text-gray-800">
-          <SoboiteIcon />
-          <span className="soboite-wordmark">Soboite</span>
-        </Link>
+        <div className="flex items-center gap-2 sm:gap-4">
+          <Link to="/" className="inline-flex items-center gap-2.5 text-gray-800">
+            <SoboiteIcon />
+            <span className="soboite-wordmark">Soboite</span>
+          </Link>
+          <div className="hidden sm:flex items-center gap-2 rounded-full bg-gray-100 px-3 py-2">
+            <Link
+              to="/recommended"
+              className={`rounded-full px-3 py-2 text-sm font-semibold ${currentPath === '/recommended' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-200'}`}
+            >
+              Recommended
+            </Link>
+            <Link
+              to="/top-picks"
+              className={`rounded-full px-3 py-2 text-sm font-semibold ${currentPath === '/top-picks' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-200'}`}
+            >
+              Top picks
+            </Link>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowMobileMenu(true)}
+            className="inline-flex items-center justify-center rounded-xl bg-transparent p-2 text-gray-700 hover:bg-gray-100 sm:hidden"
+            aria-label="Open menu"
+          >
+            <Menu size={18} />
+          </button>
+        </div>
 
         <div className="flex items-center gap-3">
           <button
             type="button"
             disabled={isRefreshing || networkBusy || isProcessing}
             onClick={handleRefresh}
-            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition"
+            className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition"
             title="Fetch latest details from server"
           >
             <RotateCw size={14} className={`${isRefreshing ? 'animate-spin text-red-500' : 'text-gray-500 hover:text-gray-700'}`} />
             <span className="hidden sm:inline font-medium">Refresh</span>
           </button>
 
-          {editMode ? (
-            <button
-              type="button"
-              onClick={() => {
-                setEditMode(false);
-                setShowSettings(false);
-              }}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <LogOut size={14} />
-              Logout
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowLoginModal(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <LogIn size={14} />
-              Login
-            </button>
-          )}
-
-          {editMode && (
-            <div className="relative">
+          <div className="hidden sm:flex items-center gap-3">
+            {editMode ? (
               <button
                 type="button"
-                disabled={isProcessing}
-                onClick={() => setShowSettings((prev) => !prev)}
-                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <Settings2 size={14} />
-                Settings
-              </button>
-
-              {showSettings && (
-                <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-gray-200 bg-white shadow-xl p-3 z-[3100]">
-                  <input
-                    ref={importFileRef}
-                type="file"
-                accept="application/json"
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0] ?? null;
-                  void importDataFromFile(file);
+                onClick={() => {
+                  setEditMode(false);
+                  setShowSettings(false);
                 }}
-              />
+                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <LogOut size={14} />
+                Logout
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowLoginModal(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <LogIn size={14} />
+                Login
+              </button>
+            )}
 
-              <div className="space-y-2">
+            {editMode && (
+              <div className="relative">
                 <button
                   type="button"
                   disabled={isProcessing}
-                  onClick={() => void exportAllData()}
-                  className="w-full inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                  onClick={() => setShowSettings((prev) => !prev)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <Download size={14} />
-                  Export all data
+                  <Settings2 size={14} />
+                  Settings
                 </button>
 
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() => importFileRef.current?.click()}
-                  className="w-full inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <Upload size={14} />
-                  Import data
-                </button>
+                {showSettings && (
+                  <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-gray-200 bg-white shadow-xl p-3 z-[3100]">
+                    <input
+                      ref={importFileRef}
+                      type="file"
+                      accept="application/json"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] ?? null;
+                        void importDataFromFile(file);
+                      }}
+                    />
 
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() => void clearTransactionalData()}
-                  className="w-full inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <DatabaseZap size={14} />
-                  Delete transactional data
-                </button>
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        disabled={isProcessing}
+                        onClick={() => void exportAllData()}
+                        className="w-full inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <Download size={14} />
+                        Export all data
+                      </button>
 
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() => void clearAllData()}
-                  className="w-full inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <DatabaseZap size={14} />
-                  Clear all data
-                </button>
+                      <button
+                        type="button"
+                        disabled={isProcessing}
+                        onClick={() => importFileRef.current?.click()}
+                        className="w-full inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <Upload size={14} />
+                        Import data
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isProcessing}
+                        onClick={() => void clearTransactionalData()}
+                        className="w-full inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <DatabaseZap size={14} />
+                        Delete transactional data
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isProcessing}
+                        onClick={() => void clearAllData()}
+                        className="w-full inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <DatabaseZap size={14} />
+                        Clear all data
+                      </button>
+                    </div>
+
+                    {statusMessage && (
+                      <p className="mt-2 text-xs text-gray-500">{statusMessage}</p>
+                    )}
+                  </div>
+                )}
               </div>
-
-              {statusMessage && (
-                <p className="mt-2 text-xs text-gray-500">{statusMessage}</p>
-              )}
-            </div>
-          )}
+            )}
           </div>
-        )}
         </div>
       </header>
+
+      {showMobileMenu && (
+        <div className="fixed inset-0 z-[4000] flex bg-black/40 backdrop-blur-sm">
+          <aside className="ml-auto w-full max-w-xs bg-white shadow-2xl border-l border-gray-200 p-5 overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <p className="text-sm uppercase tracking-[0.2em] text-gray-500">Menu</p>
+                <h2 className="text-xl font-semibold">Mobile navigation</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMobileMenu(false)}
+                className="inline-flex items-center justify-center rounded-full border border-gray-200 p-2 text-gray-600 hover:bg-gray-100"
+                aria-label="Close menu"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <nav className="space-y-3">
+              <Link
+                to="/"
+                onClick={() => setShowMobileMenu(false)}
+                className={`block rounded-2xl px-4 py-3 text-sm font-semibold ${currentPath === '/' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+              >
+                Home
+              </Link>
+              <Link
+                to="/recommended"
+                onClick={() => setShowMobileMenu(false)}
+                className={`block rounded-2xl px-4 py-3 text-sm font-semibold ${currentPath === '/recommended' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+              >
+                Recommended
+              </Link>
+              <Link
+                to="/top-picks"
+                onClick={() => setShowMobileMenu(false)}
+                className={`block rounded-2xl px-4 py-3 text-sm font-semibold ${currentPath === '/top-picks' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+              >
+                Top picks
+              </Link>
+            </nav>
+
+            <div className="mt-6 space-y-3">
+              {editMode ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSettings(true);
+                    setShowMobileMenu(false);
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+                >
+                  <Settings2 size={16} />
+                  Settings
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLoginModal(true);
+                    setShowMobileMenu(false);
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+                >
+                  <LogIn size={16} />
+                  Login
+                </button>
+              )}
+
+              {editMode && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditMode(false);
+                    setShowSettings(false);
+                    setShowMobileMenu(false);
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  <LogOut size={16} />
+                  Logout
+                </button>
+              )}
+            </div>
+          </aside>
+          <button
+            type="button"
+            className="flex-1"
+            onClick={() => setShowMobileMenu(false)}
+            aria-label="Close mobile menu overlay"
+          />
+        </div>
+      )}
 
       {showLoginModal && (
         <div className="fixed inset-0 z-[4000] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
