@@ -42,10 +42,17 @@ function MapClickHandler({ onPick }: { onPick: (latlng: L.LatLng) => void }) {
 
 function MapUpdater({ center }: { center: L.LatLng }) {
   const map = useMap();
+  const lat = center?.lat;
+  const lng = center?.lng;
+
   useEffect(() => {
-    if (!Number.isFinite(center.lat) || !Number.isFinite(center.lng)) return;
-    map.flyTo(center, map.getZoom());
-  }, [center, map]);
+    if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    
+    const size = map.getSize();
+    if (size.x === 0 || size.y === 0) return;
+
+    map.flyTo([lat, lng], map.getZoom());
+  }, [lat, lng, map]);
   return null;
 }
 

@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMapEvents, use
 import { useStore } from '../store/useStore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, X, Star, Utensils, SlidersHorizontal, RotateCcw, ImagePlus, Loader2 } from 'lucide-react';
+import { Plus, X, Star, Utensils, SlidersHorizontal, RotateCcw, ImagePlus, Loader2, Smile } from 'lucide-react';
 import L from 'leaflet';
 import { Restaurant } from '../types';
 import { optimizeImage } from '../lib/imageOptimization';
@@ -134,17 +134,22 @@ function MapClickHandler({ onClick }: { onClick: (e: any) => void }) {
 
 function MapViewportUpdater({ center }: { center: L.LatLng | null }) {
   const map = useMap();
+  const lat = center?.lat;
+  const lng = center?.lng;
 
   useEffect(() => {
-    if (!center || !Number.isFinite(center.lat) || !Number.isFinite(center.lng)) return;
-    const normalizedCenter = safeLatLng(center);
-    if (!normalizedCenter) return;
-    map.flyTo(normalizedCenter, Math.max(map.getZoom(), 15), {
+    if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    
+    // Check if the map is visible before flying to avoid NaN errors when container is display:none
+    const size = map.getSize();
+    if (size.x === 0 || size.y === 0) return;
+
+    map.flyTo([lat, lng], Math.max(map.getZoom(), 15), {
       animate: true,
       duration: 0.6,
       easeLinearity: 0.25,
     });
-  }, [center, map]);
+  }, [lat, lng, map]);
 
   return null;
 }
@@ -262,6 +267,9 @@ export default function MapPage() {
   const [filterTypes, setFilterTypes] = useState<string[]>([]);
   const [filterCuisines, setFilterCuisines] = useState<string[]>([]);
   const [filterLocations, setFilterLocations] = useState<string[]>([]);
+  const [filterMood, setFilterMood] = useState<string | null>(null);
+  const [isMoodMenuOpen, setIsMoodMenuOpen] = useState(true);
+  const [showNoMatchToast, setShowNoMatchToast] = useState(false);
   const [filterVegOnly, setFilterVegOnly] = useState(false);
   const [costRange, setCostRange] = useState({ min: '', max: '' });
   const [restaurantPhoto, setRestaurantPhoto] = useState('');
@@ -346,6 +354,7 @@ export default function MapPage() {
   } | null>(null);
   const [draggingDishPhotoId, setDraggingDishPhotoId] = useState<string | null>(null);
   const isApiBusy = loading || isSavingRestaurant;
+  const showInitialLoader = (loading || isBootstrappingData) && restaurants.length === 0;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedRest = searchParams.get('restaurant');
@@ -474,6 +483,7 @@ export default function MapPage() {
     const matchesType = filterTypes.length === 0 || (restaurant.type ? filterTypes.includes(restaurant.type) : false);
     const matchesCuisine = filterCuisines.length === 0 || (restaurant.cuisine ? filterCuisines.includes(restaurant.cuisine) : false);
     const matchesLocation = filterLocations.length === 0 || (restaurant.locationName ? filterLocations.includes(restaurant.locationName) : false);
+    const matchesMood = restaurantMatchesMood(restaurant);
     const matchesVegOnly = !filterVegOnly || Boolean(restaurant.vegOnly);
 
     const minCost = costRange.min ? Number(costRange.min) : null;
@@ -485,7 +495,7 @@ export default function MapPage() {
         && (minCost === null || costValue >= minCost)
         && (maxCost === null || costValue <= maxCost));
 
-    return matchesType && matchesCuisine && matchesLocation && matchesVegOnly && matchesCost;
+    return matchesType && matchesCuisine && matchesLocation && matchesMood && matchesVegOnly && matchesCost;
   };
 
   const toggleTypeFilter = (value: string) => {
@@ -504,6 +514,7 @@ export default function MapPage() {
     setFilterTypes([]);
     setFilterCuisines([]);
     setFilterLocations([]);
+    setFilterMood(null);
     setFilterVegOnly(false);
     setCostRange({ min: '', max: '' });
   };
@@ -1092,9 +1103,75 @@ export default function MapPage() {
   };
 
   const activeRest = restaurants.find(r => r.id === selectedRest);
+  const moodOptions = [
+    {
+      key: 'pizza',
+      label: 'Pizza',
+      emoji: '🍕',
+      keywords: ['pizza', 'slice', 'margherita', 'cheese', 'pizza']
+    },
+    {
+      key: 'burger',
+      label: 'Burger',
+      emoji: '🍔',
+      keywords: ['burger', 'bun', 'patty', 'cheese', 'fries']
+    },
+    {
+      key: 'south-indian',
+      label: 'South Indian',
+      emoji: '🥘',
+      keywords: ['south indian', 'dosa', 'idli', 'uttapam', 'sambar', 'vada', 'filter coffee']
+    },
+    {
+      key: 'chinese',
+      label: 'Chinese',
+      emoji: '🥟',
+      keywords: ['chinese', 'noodle', 'manchurian', 'dimsum', 'spring roll', 'hakka']
+    },
+    {
+      key: 'street-food',
+      label: 'Street food',
+      emoji: '🌯',
+      keywords: ['street', 'chaat', 'pav bhaji', 'bhel', 'samosa', 'kebab', 'vada pav', 'kulfi']
+    },
+    {
+      key: 'dessert',
+      label: 'Dessert',
+      emoji: '🍨',
+      keywords: ['dessert', 'sweet', 'ice cream', 'kulfi', 'rasmalai', 'gajar halwa']
+    }
+  ];
+
+  const restaurantMatchesMood = (restaurant: Restaurant) => {
+    if (!filterMood) return true;
+    const option = moodOptions.find((item) => item.key === filterMood);
+    if (!option) return true;
+
+    const allText = [
+      restaurant.name,
+      restaurant.type,
+      restaurant.cuisine,
+      restaurant.locationName,
+      restaurant.address,
+      restaurant.notes
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    const restaurantDishes = dishes.filter((dish) => dish.restaurantId === restaurant.id);
+    const dishText = restaurantDishes
+      .map((dish) => [dish.name, dish.review, dish.cuisine, ...(dish.flavorTags ?? [])].filter(Boolean).join(' '))
+      .join(' ')
+      .toLowerCase();
+
+    const searchText = `${allText} ${dishText}`;
+    return option.keywords.some((keyword) => searchText.includes(keyword));
+  };
+
   const filteredRestaurants = useMemo(
     () => restaurants.filter(matchesFilters),
-    [restaurants, filterTypes, filterCuisines, filterLocations, filterVegOnly, costRange]
+    [restaurants, filterTypes, filterCuisines, filterLocations, filterVegOnly, costRange, filterMood, dishes]
   );
 
   const getDistanceInMeters = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -1138,6 +1215,14 @@ export default function MapPage() {
 
     return [...leftCards, selectedCard, ...rightCards];
   }, [filteredRestaurants, restaurants, selectedRest]);
+
+  useEffect(() => {
+    if (!showAddForm && displayRestaurants.length === 0 && restaurants.length > 0 && !showInitialLoader && filterMood) {
+      setShowNoMatchToast(true);
+      const timer = setTimeout(() => setShowNoMatchToast(false), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [displayRestaurants.length, restaurants.length, showAddForm, showInitialLoader, filterMood]);
 
   const setCardRef = (id: string) => (node: HTMLDivElement | null) => {
     if (node) {
@@ -1357,10 +1442,13 @@ export default function MapPage() {
       key: 'cost',
       label: `₹${costRange.min || '0'} - ₹${costRange.max || 'max'}`,
       onRemove: () => setCostRange({ min: '', max: '' })
+    }] : []),
+    ...(filterMood ? [{
+      key: `mood:${filterMood}`,
+      label: moodOptions.find((item) => item.key === filterMood)?.label ?? filterMood,
+      onRemove: () => setFilterMood(null)
     }] : [])
   ];
-
-  const showInitialLoader = (loading || isBootstrappingData) && restaurants.length === 0;
 
   return (
     <div className="relative h-full w-full">
@@ -1375,8 +1463,61 @@ export default function MapPage() {
         </button>
       </div>
 
+      <AnimatePresence>
+        {!isMoodMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            className="absolute top-4 left-16 z-[1000]"
+          >
+            <button
+              onClick={() => setIsMoodMenuOpen(true)}
+              className="bg-white/95 backdrop-blur border border-gray-200 rounded-full shadow-lg p-3 text-gray-700 hover:text-black transition"
+              aria-label="Open what's on your mind"
+            >
+              <Smile size={18} />
+            </button>
+          </motion.div>
+        )}
+        {isMoodMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="absolute top-4 left-16 right-[4.5rem] z-[1000]"
+          >
+            <div className="rounded-[2rem] border border-gray-200 bg-white/95 p-1.5 shadow-xl backdrop-blur flex items-center gap-2 pr-2 overflow-hidden">
+              <div className="flex items-center pl-2 shrink-0">
+                <p className="text-[11px] font-bold text-gray-700 whitespace-nowrap hidden sm:block">What's on your mind?</p>
+                <p className="text-[11px] font-bold text-gray-700 whitespace-nowrap sm:hidden">Mood</p>
+              </div>
+              <div className="flex overflow-x-auto gap-1.5 snap-x flex-1 [&::-webkit-scrollbar]:hidden" style={{ msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
+                {moodOptions.map((option) => {
+                  const isActive = filterMood === option.key;
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => setFilterMood((prev) => (prev === option.key ? null : option.key))}
+                      className={`flex-none snap-center flex items-center justify-center gap-1.5 rounded-full border px-2.5 py-1 transition ${isActive ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'}`}
+                    >
+                      <span className="text-sm">{option.emoji}</span>
+                      <span className="text-[11px] font-semibold whitespace-nowrap">{option.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <button onClick={() => setIsMoodMenuOpen(false)} className="text-gray-400 hover:text-gray-700 shrink-0 bg-gray-100 rounded-full p-1" aria-label="Close menu">
+                <X size={14} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {selectedFilters.length > 0 && (
-        <div className="absolute top-16 right-4 z-[1000] max-w-[70vw]">
+        <div className="absolute top-[calc(4rem+1.5rem)] right-4 z-[1000] max-w-[70vw]">
           <div className="flex flex-col items-end gap-2">
             {selectedFilters.map((filter) => (
               <button
@@ -1604,6 +1745,21 @@ export default function MapPage() {
           <Marker position={[validPinLatLng.lat, validPinLatLng.lng]} opacity={0.5} />
         )}
       </MapContainer>
+
+      <AnimatePresence>
+        {showNoMatchToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="absolute bottom-12 left-1/2 -translate-x-1/2 z-[1100] flex items-center justify-center pointer-events-none px-4"
+          >
+            <div className="rounded-full bg-black/80 px-4 py-2.5 text-center shadow-xl backdrop-blur">
+              <p className="text-sm font-medium text-white whitespace-nowrap">No matches found</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {!showAddForm && displayRestaurants.length > 0 && (
         <div
@@ -1854,7 +2010,7 @@ export default function MapPage() {
                       <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
                       <MapClickHandler onClick={(event) => setLatLngSafely(event.latlng)} />
                       <MapViewportUpdater center={validPinLatLng ? safeLatLng(validPinLatLng) : (validCurrentPosition ? safeLatLng(validCurrentPosition) : null)} />
-                      <MapContainerResizeFixer trigger={validPinLatLng ? `${validPinLatLng.lat}-${validPinLatLng.lng}` : validCurrentPosition ? `${validCurrentPosition.lat}-${validCurrentPosition.lng}` : 'default'} />
+                      <MapContainerResizeFixer trigger={`${addStep}-${validPinLatLng ? `${validPinLatLng.lat}-${validPinLatLng.lng}` : validCurrentPosition ? `${validCurrentPosition.lat}-${validCurrentPosition.lng}` : 'default'}`} />
                       {validPinLatLng && (
                         <Marker
                           position={[validPinLatLng.lat, validPinLatLng.lng]}
