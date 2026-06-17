@@ -81,8 +81,8 @@ export const api = {
 
   // Image Upload
   uploadImage: async (dataUrl: string) => {
-    const res = await sendJSON<{ url: string }>("POST", "/api/upload-image", { dataUrl });
-    return res.url;
+    const res = await sendJSON<{ image_storage_url: string }>("POST", "/api/upload-image", { dataUrl });
+    return res.image_storage_url;
   },
 
   // Admin Export/Import

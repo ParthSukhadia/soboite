@@ -182,7 +182,7 @@ const normalizeReviews = (
 };
 
 const normalizeDbRestaurant = (r: any): Restaurant => {
-  const photos = normalizePhotos(r.photos, r.image_url);
+  const photos = normalizePhotos(r.photos, r.image_storage_url);
   const primaryPhotoId = resolvePrimaryPhotoId(photos, r.primary_photo_id ?? r.primaryPhotoId);
   return {
     id: r.id,
@@ -195,7 +195,7 @@ const normalizeDbRestaurant = (r: any): Restaurant => {
     notes: r.notes,
     photos: photos.length > 0 ? photos : undefined,
     primaryPhotoId,
-    imageUrl: resolvePrimaryPhotoUrl(photos, primaryPhotoId, r.image_url),
+    imageUrl: resolvePrimaryPhotoUrl(photos, primaryPhotoId, r.image_storage_url ?? r.image_url),
     type: r.type,
     cuisine: r.cuisine,
     costForTwo: r.cost_for_two ?? r.costForTwo,
@@ -208,7 +208,7 @@ const normalizeDbRestaurant = (r: any): Restaurant => {
 const normalizeDbDish = (d: any): Dish => {
   const reviews = normalizeReviews(d.reviews, d.review, d.review_date ?? d.reviewDate);
   const latestReview = reviews[0];
-  const photos = normalizePhotos(d.photos, d.image_url);
+  const photos = normalizePhotos(d.photos, d.image_storage_url);
   const primaryPhotoId = resolvePrimaryPhotoId(photos, d.primary_photo_id ?? d.primaryPhotoId);
   return {
     id: d.id,
@@ -222,7 +222,7 @@ const normalizeDbDish = (d: any): Dish => {
     reviews: reviews.length > 0 ? reviews : undefined,
     photos: photos.length > 0 ? photos : undefined,
     primaryPhotoId,
-    imageUrl: resolvePrimaryPhotoUrl(photos, primaryPhotoId, d.image_url),
+    imageUrl: resolvePrimaryPhotoUrl(photos, primaryPhotoId, d.image_storage_url ?? d.image_url),
     isRecommended: Boolean(d.is_recommended ?? d.isRecommended),
     cuisine: d.cuisine,
     flavorTags: d.flavor_tags ?? d.flavorTags
@@ -459,9 +459,9 @@ export const useStore = create<AppState>()(
       let updatedRests = state.restaurants;
       const { restaurant, dishes } = await api.getRestaurantPhotos(restaurantId);
         if (restaurant) {
-          const photos = normalizePhotos(restaurant.photos, restaurant.image_url);
+          const photos = normalizePhotos(restaurant.photos, restaurant.image_storage_url);
           const primaryPhotoId = resolvePrimaryPhotoId(photos, restaurant.primary_photo_id);
-          const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, restaurant.image_url);
+          const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, restaurant.image_storage_url);
           updatedRests = state.restaurants.map(r => r.id !== restaurantId ? r : { ...r, photos: photos.length > 0 ? photos : undefined, primaryPhotoId, imageUrl });
         }
         if (dishes) {
@@ -469,9 +469,9 @@ export const useStore = create<AppState>()(
             if (d.restaurantId !== restaurantId) return d;
             const matched = dishes.find((dbDish: any) => dbDish.id === d.id);
             if (!matched) return d;
-            const photos = normalizePhotos(matched.photos, matched.image_url);
+            const photos = normalizePhotos(matched.photos, matched.image_storage_url);
             const primaryPhotoId = resolvePrimaryPhotoId(photos, matched.primary_photo_id);
-            const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, matched.image_url);
+            const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, matched.image_storage_url);
             return { ...d, photos: photos.length > 0 ? photos : undefined, primaryPhotoId, imageUrl };
           });
           set({ restaurants: updatedRests, dishes: updatedDishes });
@@ -526,7 +526,7 @@ export const useStore = create<AppState>()(
 
       const dbUpdates = { ...normalizedUpdates };
       if (dbUpdates.imageUrl !== undefined) {
-        (dbUpdates as any).image_url = dbUpdates.imageUrl;
+        (dbUpdates as any).image_storage_url = dbUpdates.imageUrl;
         delete dbUpdates.imageUrl;
       }
       if ((dbUpdates as any).photos !== undefined) {
@@ -662,7 +662,7 @@ export const useStore = create<AppState>()(
         review: latestReview?.text ?? rest.review,
         review_date: latestReview?.date ?? rest.reviewDate,
         reviews: incomingReviews.length > 0 ? incomingReviews : undefined,
-        image_url: resolvedImageUrl,
+        image_storage_url: resolvedImageUrl,
         photos: normalizedPhotos.length > 0 ? normalizedPhotos : undefined,
         primary_photo_id: primaryPhotoId,
         is_recommended: Boolean(rest.isRecommended),
@@ -674,10 +674,11 @@ export const useStore = create<AppState>()(
       delete dbDish.priceLevel;
       delete dbDish.actualPrice;
       delete dbDish.reviewDate;
-      delete dbDish.imageUrl;
+
       delete dbDish.primaryPhotoId;
       delete dbDish.isRecommended;
       delete dbDish.flavorTags;
+delete dbDish.image_url;
       if (!dbDish.review_date) {
         delete dbDish.review_date;
       }
@@ -765,7 +766,7 @@ export const useStore = create<AppState>()(
         delete dbUpdates.reviewDate;
       }
       if (dbUpdates.imageUrl !== undefined) {
-        dbUpdates.image_url = dbUpdates.imageUrl;
+        dbUpdates.image_storage_url = dbUpdates.imageUrl;
         delete dbUpdates.imageUrl;
       }
       if (dbUpdates.photos !== undefined) {
@@ -832,7 +833,7 @@ export const useStore = create<AppState>()(
           ...existing,
           ...updates,
           photos: updates.photos !== undefined ? updates.photos : existing.photos,
-          image_url: updates.image_url !== undefined ? updates.image_url : (updates.imageUrl !== undefined ? updates.imageUrl : existing.imageUrl),
+          image_storage_url: updates.image_storage_url !== undefined ? updates.image_storage_url : (updates.imageUrl !== undefined ? updates.imageUrl : existing.imageUrl),
           primary_photo_id: updates.primary_photo_id !== undefined ? updates.primary_photo_id : (updates.primaryPhotoId !== undefined ? updates.primaryPhotoId : existing.primaryPhotoId),
           location_name: updates.location_name !== undefined ? updates.location_name : (updates.locationName !== undefined ? updates.locationName : existing.locationName),
           veg_only: updates.veg_only !== undefined ? updates.veg_only : (updates.vegOnly !== undefined ? updates.vegOnly : existing.vegOnly),
@@ -878,7 +879,7 @@ export const useStore = create<AppState>()(
           price_level: updates.price_level !== undefined ? updates.price_level : (updates.priceLevel !== undefined ? updates.priceLevel : existing.priceLevel),
           actual_price: updates.actual_price !== undefined ? updates.actual_price : (updates.actualPrice !== undefined ? updates.actualPrice : existing.actualPrice),
           review_date: updates.review_date !== undefined ? updates.review_date : (updates.reviewDate !== undefined ? updates.reviewDate : existing.reviewDate),
-          image_url: updates.image_url !== undefined ? updates.image_url : (updates.imageUrl !== undefined ? updates.imageUrl : existing.imageUrl),
+          image_storage_url: updates.image_storage_url !== undefined ? updates.image_storage_url : (updates.imageUrl !== undefined ? updates.imageUrl : existing.imageUrl),
           primary_photo_id: updates.primary_photo_id !== undefined ? updates.primary_photo_id : (updates.primaryPhotoId !== undefined ? updates.primaryPhotoId : existing.primaryPhotoId),
           is_recommended: updates.is_recommended !== undefined ? updates.is_recommended : (updates.isRecommended !== undefined ? updates.isRecommended : existing.isRecommended),
           flavor_tags: updates.flavor_tags !== undefined ? updates.flavor_tags : (updates.flavorTags !== undefined ? updates.flavorTags : existing.flavorTags)

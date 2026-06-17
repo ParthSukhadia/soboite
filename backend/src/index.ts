@@ -31,17 +31,17 @@ app.get('/health', (c) => c.text('OK'))
 // Example: Get all restaurants (replace with your actual schema)
 app.get('/api/restaurants', async (c) => {
   const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('restaurants').select('*')
+  const { data, error } = await supabase.from('restaurants').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at')
   if (error) return c.json({ error: error.message }, 500)
-  return c.json(data)
+return c.json(data);
 })
 
 // Get all dishes
 app.get('/api/dishes', async (c) => {
   const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('dishes').select('*')
+  const { data, error } = await supabase.from('dishes').select('id, name, restaurant_id, rating, price_level, actual_price, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, created_at')
   if (error) return c.json({ error: error.message }, 500)
-  return c.json(data)
+return c.json(data);
 })
 
 // Get reference data
@@ -74,20 +74,22 @@ app.get('/auth/google/callback', (c) => {
 
 // CRUD for restaurants
 app.post('/api/restaurants', async (c) => {
-  const supabase = getSupabase(c)
+  const supabase = getSupabase(c);
   const body = normalizeRequestBody(await c.req.json());
-  const { error, data } = await supabase.from('restaurants').insert(body).select();
+  const { error, data } = await supabase.from('restaurants').insert(body);
   if (error) return c.json({ error: error.message }, 500);
-  return c.json(Array.isArray(data) ? data[0] : data);
+  // Return inserted rows without selecting missing columns
+  return c.json(data);
 });
 
 app.put('/api/restaurants/:id', async (c) => {
   const supabase = getSupabase(c)
   const id = c.req.param('id');
   const updates = normalizeRequestBody(await c.req.json());
-  const { error, data } = await supabase.from('restaurants').update(updates).eq('id', id).select();
+  const { error, data } = await supabase.from('restaurants').update(updates).eq('id', id);
   if (error) return c.json({ error: error.message }, 500);
-  return c.json(Array.isArray(data) ? data[0] : data);
+  // Return updated row without selecting missing columns
+  return c.json(data?.[0] ?? {});
 });
 
 app.delete('/api/restaurants/:id', async (c) => {
@@ -101,19 +103,25 @@ app.delete('/api/restaurants/:id', async (c) => {
 // CRUD for dishes
 app.post('/api/dishes', async (c) => {
   const supabase = getSupabase(c)
-  const body = normalizeRequestBody(await c.req.json());
-  const { error, data } = await supabase.from('dishes').insert(body).select();
-  if (error) return c.json({ error: error.message }, 500);
-  return c.json(Array.isArray(data) ? data[0] : data);
+  let body = normalizeRequestBody(await c.req.json())
+  // Remove any stray image_url field that might be present
+  delete body.image_url
+  const { error, data } = await supabase.from('dishes').insert(body)
+  if (error) return c.json({ error: error.message }, 500)
+  // Return inserted row without selecting missing columns
+  return c.json(data?.[0] ?? {})
 });
 
 app.put('/api/dishes/:id', async (c) => {
   const supabase = getSupabase(c)
-  const id = c.req.param('id');
-  const updates = normalizeRequestBody(await c.req.json());
-  const { error, data } = await supabase.from('dishes').update(updates).eq('id', id).select();
-  if (error) return c.json({ error: error.message }, 500);
-  return c.json(Array.isArray(data) ? data[0] : data);
+  const id = c.req.param('id')
+  let updates = normalizeRequestBody(await c.req.json())
+  // Remove stray image_url before update
+  delete updates.image_url
+  const { error, data } = await supabase.from('dishes').update(updates).eq('id', id)
+  if (error) return c.json({ error: error.message }, 500)
+  // Return updated row without selecting missing columns
+  return c.json(data?.[0] ?? {})
 });
 
 app.delete('/api/dishes/:id', async (c) => {
@@ -185,7 +193,7 @@ app.post('/api/upload-image', async (c) => {
     const filePath = `uploads/${fileName}`;
 
     const { error } = await supabase.storage
-      .from('images')
+      .from('soboite')
       .upload(filePath, arrayBuffer, {
         contentType: mimeType,
       });
@@ -193,10 +201,10 @@ app.post('/api/upload-image', async (c) => {
     if (error) throw error;
 
     const { data } = supabase.storage
-      .from('images')
+      .from('soboite')
       .getPublicUrl(filePath);
 
-    return c.json({ url: data.publicUrl });
+    return c.json({ image_storage_url: data.publicUrl });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
