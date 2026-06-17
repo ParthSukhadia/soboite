@@ -61,4 +61,34 @@ export const api = {
     sendJSON<void>("POST", "/api/cuisines", { name }),
   upsertFlavorTag: (name: string) =>
     sendJSON<void>("POST", "/api/flavor-tags", { name }),
+  
+  // Fetch photos for a specific restaurant and its dishes
+  getRestaurantPhotos: (restaurantId: string) => 
+    getJSON<any>(`/api/restaurants/${restaurantId}/photos`),
+
+  // CRUD for restaurants and dishes
+  updateRestaurant: (id: string, updates: any) =>
+    sendJSON<any>("PUT", `/api/restaurants/${id}`, updates),
+  deleteRestaurant: (id: string) =>
+    sendJSON<void>("DELETE", `/api/restaurants/${id}`, {}),
+  
+  addDish: (dish: any) =>
+    sendJSON<any>("POST", "/api/dishes", dish),
+  updateDish: (id: string, updates: any) =>
+    sendJSON<any>("PUT", `/api/dishes/${id}`, updates),
+  deleteDish: (id: string) =>
+    sendJSON<void>("DELETE", `/api/dishes/${id}`, {}),
+
+  // Image Upload
+  uploadImage: async (dataUrl: string) => {
+    const res = await sendJSON<{ url: string }>("POST", "/api/upload-image", { dataUrl });
+    return res.url;
+  },
+
+  // Admin Export/Import
+  exportAll: () => getJSON<Record<string, any[]>>("/api/export"),
+  clearTable: (tableName: string, idColumn?: string) =>
+    sendJSON<{ success: boolean; deleted: number }>("POST", "/api/clear-table", { tableName, idColumn }),
+  importTable: (tableName: string, rows: any[], upsertKey: string) =>
+    sendJSON<{ success: boolean; imported: number }>("POST", "/api/import-table", { tableName, rows, upsertKey }),
 };

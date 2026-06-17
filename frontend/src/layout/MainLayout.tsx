@@ -1,7 +1,7 @@
 import { useRef, useState, FormEvent, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { DatabaseZap, Download, Settings2, Upload, LogIn, LogOut, Lock, X, Menu, Eye, EyeOff, Loader2, RotateCw } from 'lucide-react';
-import { supabase, hasSupabaseConfig } from '../lib/supabase';
+import { api } from '../api';
 import { useStore } from '../store/useStore';
 
 interface ExportPayload {
@@ -67,20 +67,7 @@ const chunkArray = <T,>(input: T[], chunkSize: number) => {
 };
 
 const clearTableByIds = async (tableName: string, idColumn: string = 'id') => {
-  const { data, error } = await supabase.from(tableName).select(idColumn);
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const ids = (data ?? []).map((row: any) => row[idColumn]).filter(Boolean);
-  if (ids.length === 0) return;
-
-  for (const idsChunk of chunkArray(ids, CHUNK_SIZE)) {
-    const { error: deleteError } = await supabase.from(tableName).delete().in(idColumn, idsChunk);
-    if (deleteError) {
-      throw new Error(deleteError.message);
-    }
-  }
+  await api.clearTable(tableName, idColumn);
 };
 
 function SoboiteIcon() {
@@ -96,13 +83,7 @@ export default function MainLayout() {
     fetchData,
     editMode,
     setEditMode,
-    networkBusy,
-    addRestaurantToState,
-    updateRestaurantInState,
-    deleteRestaurantFromState,
-    addDishToState,
-    updateDishInState,
-    deleteDishFromState
+    networkBusy
   } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
@@ -137,82 +118,13 @@ export default function MainLayout() {
     }
   };
 
-  useEffect(() => {
-    if (!hasSupabaseConfig) {
-      console.log('Supabase realtime is disabled because env vars are missing.');
-      return;
-    }
-
-    console.log("Setting up Supabase Realtime Postgres change channels...");
-    const channel = supabase
-      .channel('soboite-db-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'restaurants' },
-        (payload) => {
-          console.log('Realtime Restaurant Change:', payload);
-          const { eventType, new: newRecord, old: oldRecord } = payload;
-          if (eventType === 'INSERT') {
-            addRestaurantToState(newRecord);
-          } else if (eventType === 'UPDATE') {
-            updateRestaurantInState(newRecord.id, newRecord);
-          } else if (eventType === 'DELETE') {
-            deleteRestaurantFromState(oldRecord.id);
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'dishes' },
-        (payload) => {
-          console.log('Realtime Dish Change:', payload);
-          const { eventType, new: newRecord, old: oldRecord } = payload;
-          if (eventType === 'INSERT') {
-            addDishToState(newRecord);
-          } else if (eventType === 'UPDATE') {
-            updateDishInState(newRecord.id, newRecord);
-          } else if (eventType === 'DELETE') {
-            deleteDishFromState(oldRecord.id);
-          }
-        }
-      )
-      .subscribe((status) => {
-        console.log(`Supabase Realtime Channel status: ${status}`);
-      });
-
-    return () => {
-      console.log("Cleaning up Supabase Realtime Postgres change channels...");
-      void supabase.removeChannel(channel);
-    };
-  }, [
-    addRestaurantToState,
-    updateRestaurantInState,
-    deleteRestaurantFromState,
-    addDishToState,
-    updateDishInState,
-    deleteDishFromState
-  ]);
+  // Realtime updates have been removed as part of API migration.
 
   const exportAllData = async () => {
     setIsProcessing(true);
     setStatusMessage(null);
     try {
-      const tableResults = await Promise.all(
-        TABLES.map(async (table) => {
-          const response = await supabase.from(table.name).select('*');
-          return { table: table.name, response };
-        })
-      );
-
-      const firstError = tableResults.map((result) => result.response.error).find(Boolean);
-      if (firstError) {
-        throw new Error(firstError.message);
-      }
-
-      const tables: Record<string, any[]> = {};
-      tableResults.forEach((result) => {
-        tables[result.table] = result.response.data ?? [];
-      });
+      const tables = await api.exportAll();
 
       const upsertKeys = TABLES.reduce<Record<string, string>>((acc, table) => {
         acc[table.name] = table.upsertKey;
@@ -315,10 +227,7 @@ export default function MainLayout() {
           ?? 'id';
 
         for (const chunk of chunkArray(rows, CHUNK_SIZE)) {
-          const { error } = await supabase.from(tableName).upsert(chunk, { onConflict: upsertKey });
-          if (error) {
-            throw new Error(`Import failed for ${tableName}: ${error.message}`);
-          }
+        await api.importTable(tableName, chunk, upsertKey);
         }
       }
 

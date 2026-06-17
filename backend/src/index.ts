@@ -157,4 +157,112 @@ app.get('/api/restaurant-photos/:id', async (c) => {
 
 // Note: getRestaurantPhotos endpoint can be added later.
 
+// Image upload endpoint
+app.post('/api/upload-image', async (c) => {
+  const supabase = getSupabase(c);
+  const body = await c.req.json();
+  const dataUrl = body.dataUrl;
+
+  if (!dataUrl || !dataUrl.startsWith('data:')) {
+    return c.json({ error: 'Invalid data URL' }, 400);
+  }
+
+  try {
+    const [header, base64] = dataUrl.split(',');
+    const mimeMatch = header.match(/:(.*?);/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const fileExt = mimeType.split('/')[1] || 'jpg';
+    
+    // Decode base64 to Uint8Array
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    const arrayBuffer = bytes.buffer;
+
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const filePath = `uploads/${fileName}`;
+
+    const { error } = await supabase.storage
+      .from('images')
+      .upload(filePath, arrayBuffer, {
+        contentType: mimeType,
+      });
+
+    if (error) throw error;
+
+    const { data } = supabase.storage
+      .from('images')
+      .getPublicUrl(filePath);
+
+    return c.json({ url: data.publicUrl });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Admin endpoints
+app.get('/api/export', async (c) => {
+  const supabase = getSupabase(c);
+  const tables = ['restaurant_types', 'cuisines', 'flavor_tags', 'restaurants', 'dishes'];
+  const tableResults = await Promise.all(
+    tables.map(async (table) => {
+      const { data, error } = await supabase.from(table).select('*');
+      return { table, data, error };
+    })
+  );
+  
+  const firstError = tableResults.find(r => r.error);
+  if (firstError) return c.json({ error: firstError.error?.message }, 500);
+
+  const exportData: Record<string, any[]> = {};
+  tableResults.forEach(r => {
+    exportData[r.table] = r.data || [];
+  });
+  return c.json(exportData);
+});
+
+app.post('/api/clear-table', async (c) => {
+  const supabase = getSupabase(c);
+  const { tableName, idColumn = 'id' } = await c.req.json();
+  
+  const { data, error } = await supabase.from(tableName).select(idColumn);
+  if (error) return c.json({ error: error.message }, 500);
+  
+  const ids = (data ?? []).map((row: any) => row[idColumn]).filter(Boolean);
+  if (ids.length === 0) return c.json({ success: true, deleted: 0 });
+  
+  const chunkArray = (arr: any[], size: number) => {
+    const res = [];
+    for(let i=0; i<arr.length; i+=size) res.push(arr.slice(i, i+size));
+    return res;
+  };
+  
+  for (const chunk of chunkArray(ids, 500)) {
+    const { error: delErr } = await (supabase as any).from(tableName).delete().in(idColumn, chunk);
+    if (delErr) return c.json({ error: delErr.message }, 500);
+  }
+  return c.json({ success: true, deleted: ids.length });
+});
+
+app.post('/api/import-table', async (c) => {
+  const supabase = getSupabase(c);
+  const { tableName, rows, upsertKey } = await c.req.json();
+  
+  if (!rows || rows.length === 0) return c.json({ success: true, imported: 0 });
+  
+  const chunkArray = (arr: any[], size: number) => {
+    const res = [];
+    for(let i=0; i<arr.length; i+=size) res.push(arr.slice(i, i+size));
+    return res;
+  };
+  
+  for (const chunk of chunkArray(rows, 500)) {
+    const { error } = await (supabase as any).from(tableName).upsert(chunk, { onConflict: upsertKey });
+    if (error) return c.json({ error: error.message }, 500);
+  }
+  return c.json({ success: true, imported: rows.length });
+});
+
 export default app;

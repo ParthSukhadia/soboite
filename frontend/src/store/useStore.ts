@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Restaurant, Dish, DishReview, PhotoEntry } from '../types';
 import { api } from '../api';
-import { api } from '../api';
 import { prefetchCachedImages } from '../lib/imageCache';
 import { indexedDBStorage } from './indexedDBStorage';
 
@@ -128,6 +127,11 @@ const cacheImageUrlsForState = async (restaurants: Restaurant[], dishes: Dish[])
   const urls = collectImageUrls(restaurants, dishes);
   if (urls.length === 0) return;
   await prefetchCachedImages(urls);
+};
+
+const uploadImage = async (dataUrl: string): Promise<string> => {
+  if (!dataUrl.startsWith('data:')) return dataUrl;
+  return await api.uploadImage(dataUrl);
 };
 
 const normalizeReviews = (
@@ -463,7 +467,7 @@ export const useStore = create<AppState>()(
         if (dishes) {
           const updatedDishes = state.dishes.map(d => {
             if (d.restaurantId !== restaurantId) return d;
-            const matched = dishes.find(dbDish => dbDish.id === d.id);
+            const matched = dishes.find((dbDish: any) => dbDish.id === d.id);
             if (!matched) return d;
             const photos = normalizePhotos(matched.photos, matched.image_url);
             const primaryPhotoId = resolvePrimaryPhotoId(photos, matched.primary_photo_id);
@@ -501,7 +505,7 @@ export const useStore = create<AppState>()(
           normalizedUpdates.photos = await Promise.all(
             normalizedUpdates.photos.map(async (photo) => {
               if (photo && photo.url && photo.url.startsWith('data:')) {
-                const url = await api.uploadImage(photo.url);
+                const url = await uploadImage(photo.url);
                 return { ...photo, url };
               }
               return photo;
@@ -553,16 +557,16 @@ export const useStore = create<AppState>()(
         delete (dbUpdates as any).serviceRating;
       }
 
-      let { error } = await supabase.from('restaurants').update(dbUpdates).eq('id', id);
-      while (
-        error
-        && removeMissingColumnsFromPayload(dbUpdates as any, error, ['photos', 'primary_photo_id', 'location_name', 'address', 'veg_only', 'ambience_rating', 'service_rating'])
-      ) {
-        const retry = await supabase.from('restaurants').update(dbUpdates).eq('id', id);
-        error = retry.error;
-      }
-      if (error) {
-        throw new Error(error.message);
+      let success = false;
+      while (!success) {
+        try {
+          await api.updateRestaurant(id, dbUpdates);
+          success = true;
+        } catch (err: any) {
+          if (!removeMissingColumnsFromPayload(dbUpdates as any, err, ['photos', 'primary_photo_id', 'location_name', 'address', 'veg_only', 'ambience_rating', 'service_rating'])) {
+            throw err;
+          }
+        }
       }
       set((state) => ({
         restaurants: state.restaurants.map((r) => r.id === id ? { ...r, ...normalizedUpdates } : r)
@@ -573,13 +577,10 @@ export const useStore = create<AppState>()(
     },
     deleteRestaurant: async (id) => {
       activeFetchId++; // Invalidate any ongoing background fetches
-      const { error: dishError } = await supabase.from('dishes').delete().eq('restaurant_id', id);
-      if (dishError) {
-        throw new Error(dishError.message);
-      }
-      const { error: restaurantError } = await supabase.from('restaurants').delete().eq('id', id);
-      if (restaurantError) {
-        throw new Error(restaurantError.message);
+      try {
+        await api.deleteRestaurant(id);
+      } catch (err: any) {
+        throw new Error(err.message);
       }
       set((state) => ({
         restaurants: state.restaurants.filter((r) => r.id !== id),
@@ -684,20 +685,16 @@ export const useStore = create<AppState>()(
         delete dbDish.reviews;
       }
       
-      let { error } = await supabase.from('dishes').insert(dbDish);
-      while (
-        error
-        && removeMissingColumnsFromPayload(
-          dbDish,
-          error,
-          ['actual_price', 'review_date', 'reviews', 'photos', 'primary_photo_id', 'is_recommended', 'cuisine', 'flavor_tags']
-        )
-      ) {
-        const retry = await supabase.from('dishes').insert(dbDish);
-        error = retry.error;
-      }
-      if (error) {
-        throw new Error(error.message);
+      let success = false;
+      while (!success) {
+        try {
+          await api.addDish(dbDish);
+          success = true;
+        } catch (err: any) {
+          if (!removeMissingColumnsFromPayload(dbDish, err, ['actual_price', 'review_date', 'reviews', 'photos', 'primary_photo_id', 'is_recommended', 'cuisine', 'flavor_tags'])) {
+            throw err;
+          }
+        }
       }
       set((state) => ({
         dishes: [
@@ -787,29 +784,26 @@ export const useStore = create<AppState>()(
         delete dbUpdates.flavorTags;
       }
       
-      let { error } = await supabase.from('dishes').update(dbUpdates).eq('id', id);
-      while (
-        error
-        && removeMissingColumnsFromPayload(
-          dbUpdates,
-          error,
-          ['actual_price', 'review_date', 'reviews', 'photos', 'primary_photo_id', 'is_recommended', 'cuisine', 'flavor_tags']
-        )
-      ) {
-        const retry = await supabase.from('dishes').update(dbUpdates).eq('id', id);
-        error = retry.error;
-      }
-      if (error) {
-        throw new Error(error.message);
+      let success = false;
+      while (!success) {
+        try {
+          await api.updateDish(id, dbUpdates);
+          success = true;
+        } catch (err: any) {
+          if (!removeMissingColumnsFromPayload(dbUpdates, err, ['actual_price', 'review_date', 'reviews', 'photos', 'primary_photo_id', 'is_recommended', 'cuisine', 'flavor_tags'])) {
+            throw err;
+          }
+        }
       }
       set((state) => ({
         dishes: state.dishes.map((d) => d.id === id ? { ...d, ...normalizedUpdates } : d)
       }));
     },
     deleteDish: async (id) => {
-      const { error } = await supabase.from('dishes').delete().eq('id', id);
-      if (error) {
-        throw new Error(error.message);
+      try {
+        await api.deleteDish(id);
+      } catch (err: any) {
+        throw new Error(err.message);
       }
       set((state) => ({
         dishes: state.dishes.filter((d) => d.id !== id)

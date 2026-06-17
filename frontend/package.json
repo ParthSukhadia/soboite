@@ -1,29 +1,24 @@
 {
-  "name": "soboite",
+  "name": "soboite-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:backend": "cd backend && npm exec wrangler -- dev --host 0.0.0.0",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260608.1",
     "@tailwindcss/vite": "^4.2.2",
     "@types/leaflet": "^1.9.21",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.4",
-    "hono": "^4.12.23",
     "typescript": "~5.6.2",
-    "vite": "^6.0.0",
-    "wrangler": "^4.98.0"
+    "vite": "^6.0.0"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
-    "@supabase/supabase-js": "^2.100.1",
     "autoprefixer": "^10.4.27",
     "framer-motion": "^12.38.0",
     "leaflet": "^1.9.4",
