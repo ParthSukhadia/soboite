@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Restaurant, Dish, DishReview, PhotoEntry } from '../types';
-import { supabase, uploadImage } from '../lib/supabase';
+import { api } from '../api';
+import { api } from '../api';
 import { prefetchCachedImages } from '../lib/imageCache';
 import { indexedDBStorage } from './indexedDBStorage';
 
@@ -292,33 +293,19 @@ export const useStore = create<AppState>()(
       const normalized = value.trim();
       if (!normalized) return;
 
-      const { error } = await supabase
-        .from('restaurant_types')
-        .upsert({ name: normalized }, { onConflict: 'name' });
+      const alreadyExists = get().restaurantTypes.some((item) => item.toLowerCase() === normalized.toLowerCase());
+      if (alreadyExists) return;
 
-      if (error && !error.message.includes('does not exist')) {
-        throw new Error(error.message);
-      }
+      await api.upsertRestaurantType(normalized);
 
-      set((state) => {
-        if (state.restaurantTypes.some((item) => item.toLowerCase() === normalized.toLowerCase())) {
-          return state;
-        }
-        return { restaurantTypes: [...state.restaurantTypes, normalized].sort((a, b) => a.localeCompare(b)) };
-      });
+      set((state) => ({ restaurantTypes: [...state.restaurantTypes, normalized].sort((a, b) => a.localeCompare(b)) }));
     },
 
     ensureCuisine: async (value: string) => {
       const normalized = value.trim();
       if (!normalized) return;
 
-      const { error } = await supabase
-        .from('cuisines')
-        .upsert({ name: normalized }, { onConflict: 'name' });
-
-      if (error && !error.message.includes('does not exist')) {
-        throw new Error(error.message);
-      }
+      await api.upsertCuisine(normalized);
 
       set((state) => {
         if (state.cuisines.some((item) => item.toLowerCase() === normalized.toLowerCase())) {
@@ -332,13 +319,7 @@ export const useStore = create<AppState>()(
       const normalized = value.trim();
       if (!normalized) return;
 
-      const { error } = await supabase
-        .from('flavor_tags')
-        .upsert({ name: normalized }, { onConflict: 'name' });
-
-      if (error && !error.message.includes('does not exist')) {
-        throw new Error(error.message);
-      }
+      await api.upsertFlavorTag(normalized);
 
       set((state) => {
         if (state.flavorTags.some((item) => item.toLowerCase() === normalized.toLowerCase())) {
@@ -365,44 +346,18 @@ export const useStore = create<AppState>()(
         const fetchId = ++activeFetchId;
         console.log("Starting data fetch from Supabase... (Fetch ID:", fetchId, ")");
         try {
-          let restRes: any;
-          let dishRes: any;
-          let typeRes: any;
-          let cuisineRes: any;
-          let flavorTagRes: any;
-
-          let retries = 3;
-          let delayMs = 1000;
-
-          while (retries > 0) {
-            try {
-              const [rRes, dRes, tRes, cRes, fRes] = await Promise.all([
-                supabase.from('restaurants').select('id, name, lat, lng, location_name, address, veg_only, notes, image_url, photos, primary_photo_id, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at'),
-                supabase.from('dishes').select('id, restaurant_id, name, rating, price_level, actual_price, review, review_date, reviews, image_url, photos, primary_photo_id, is_recommended, cuisine, flavor_tags'),
-                supabase.from('restaurant_types').select('name'),
-                supabase.from('cuisines').select('name'),
-                supabase.from('flavor_tags').select('name')
-              ]);
-
-              restRes = rRes;
-              dishRes = dRes;
-              typeRes = tRes;
-              cuisineRes = cRes;
-              flavorTagRes = fRes;
-
-              if (!restRes.error && !dishRes.error) {
-                break;
-              }
-              console.warn("Retrying fetch due to error in critical queries:", { restError: restRes.error, dishError: dishRes.error });
-            } catch (err) {
-              console.warn("Retrying fetch due to parallel Promise.all exception:", err);
-            }
-
-            retries--;
-            if (retries === 0) break;
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-            delayMs *= 2;
-          }
+          const [restaurants, dishes, types, cuisines, flavorTags] = await Promise.all([
+            api.getRestaurants(),
+            api.getDishes(),
+            Promise.resolve([]),
+            Promise.resolve([]),
+            Promise.resolve([]),
+          ]);
+          let restRes = { data: restaurants, error: null } as any;
+          let dishRes = { data: dishes, error: null } as any;
+          let typeRes = { data: types, error: null } as any;
+          let cuisineRes = { data: cuisines, error: null } as any;
+          let flavorTagRes = { data: flavorTags, error: null } as any;
 
           if (fetchId !== activeFetchId) {
             console.log("Fetch ID mismatch. Aborting this fetch.", fetchId);
@@ -497,129 +452,41 @@ export const useStore = create<AppState>()(
         return;
       }
 
-      const restPromise = supabase
-        .from('restaurants')
-        .select('photos, image_url, primary_photo_id')
-        .eq('id', restaurantId)
-        .single();
-      const dishPromise = supabase
-        .from('dishes')
-        .select('id, photos, image_url, primary_photo_id')
-        .eq('restaurant_id', restaurantId);
-
-      const [restRes, dishRes] = await Promise.all([restPromise, dishPromise]);
-
-      if (restRes.error) {
-        console.error("Error fetching restaurant photos on-demand:", restRes.error);
-        return;
-      }
-
-      const updatedRests = state.restaurants.map((r) => {
-        if (r.id !== restaurantId) return r;
-        const photos = normalizePhotos(restRes.data.photos, restRes.data.image_url);
-        const primaryPhotoId = resolvePrimaryPhotoId(photos, restRes.data.primary_photo_id);
-        const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, restRes.data.image_url);
-        return {
-          ...r,
-          photos: photos.length > 0 ? photos : undefined,
-          primaryPhotoId,
-          imageUrl
-        };
-      });
-
-      const dishData = dishRes.data || [];
-      const updatedDishes = state.dishes.map((d) => {
-        if (d.restaurantId !== restaurantId) return d;
-        const matched = dishData.find((dbDish) => dbDish.id === d.id);
-        if (!matched) return d;
-        const photos = normalizePhotos(matched.photos, matched.image_url);
-        const primaryPhotoId = resolvePrimaryPhotoId(photos, matched.primary_photo_id);
-        const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, matched.image_url);
-        return {
-          ...d,
-          photos: photos.length > 0 ? photos : undefined,
-          primaryPhotoId,
-          imageUrl
-        };
-      });
-
-      set({
-        restaurants: updatedRests,
-        dishes: updatedDishes
-      });
-
-      void cacheImageUrlsForState(updatedRests, updatedDishes);
-    },
+      let updatedRests = state.restaurants;
+      const { restaurant, dishes } = await api.getRestaurantPhotos(restaurantId);
+        if (restaurant) {
+          const photos = normalizePhotos(restaurant.photos, restaurant.image_url);
+          const primaryPhotoId = resolvePrimaryPhotoId(photos, restaurant.primary_photo_id);
+          const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, restaurant.image_url);
+          updatedRests = state.restaurants.map(r => r.id !== restaurantId ? r : { ...r, photos: photos.length > 0 ? photos : undefined, primaryPhotoId, imageUrl });
+        }
+        if (dishes) {
+          const updatedDishes = state.dishes.map(d => {
+            if (d.restaurantId !== restaurantId) return d;
+            const matched = dishes.find(dbDish => dbDish.id === d.id);
+            if (!matched) return d;
+            const photos = normalizePhotos(matched.photos, matched.image_url);
+            const primaryPhotoId = resolvePrimaryPhotoId(photos, matched.primary_photo_id);
+            const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId, matched.image_url);
+            return { ...d, photos: photos.length > 0 ? photos : undefined, primaryPhotoId, imageUrl };
+          });
+          set({ restaurants: updatedRests, dishes: updatedDishes });
+          void cacheImageUrlsForState(updatedRests, updatedDishes);
+        } else {
+          set({ restaurants: updatedRests });
+          void cacheImageUrlsForState(updatedRests, state.dishes);
+        }  },
 
     addRestaurant: async (restaurant) => {
-      set({ networkBusy: true });
-      try {
-        let uploadedImageUrl = restaurant.imageUrl;
-        if (restaurant.imageUrl && restaurant.imageUrl.startsWith('data:')) {
-          uploadedImageUrl = await uploadImage(restaurant.imageUrl);
-        }
-
-        let uploadedPhotos = restaurant.photos;
-        if (Array.isArray(restaurant.photos)) {
-          uploadedPhotos = await Promise.all(
-            restaurant.photos.map(async (photo) => {
-              if (photo && photo.url && photo.url.startsWith('data:')) {
-                const url = await uploadImage(photo.url);
-                return { ...photo, url };
-              }
-              return photo;
-            })
-          );
-        }
-
-        const normalizedPhotos = normalizePhotos(uploadedPhotos, uploadedImageUrl);
-        const primaryPhotoId = resolvePrimaryPhotoId(normalizedPhotos, restaurant.primaryPhotoId);
-        const resolvedImageUrl = resolvePrimaryPhotoUrl(normalizedPhotos, primaryPhotoId, uploadedImageUrl);
-        const normalizedRestaurant: Restaurant = {
-          ...restaurant,
-          photos: normalizedPhotos.length > 0 ? normalizedPhotos : undefined,
-          primaryPhotoId,
-          imageUrl: resolvedImageUrl
-        };
-
-      const dbRest: any = {
-        ...normalizedRestaurant,
-        image_url: normalizedRestaurant.imageUrl,
-        photos: normalizedRestaurant.photos,
-        primary_photo_id: normalizedRestaurant.primaryPhotoId,
-        location_name: normalizedRestaurant.locationName,
-        address: normalizedRestaurant.address,
-        veg_only: normalizedRestaurant.vegOnly,
-        cost_for_two: normalizedRestaurant.costForTwo,
-        ambience_rating: normalizedRestaurant.ambienceRating,
-        service_rating: normalizedRestaurant.serviceRating,
-        created_at: normalizedRestaurant.createdAt ? new Date(normalizedRestaurant.createdAt).toISOString() : undefined
-      };
-      delete (dbRest as any).createdAt;
-      delete (dbRest as any).imageUrl;
-      delete (dbRest as any).primaryPhotoId;
-      delete (dbRest as any).locationName;
-      delete (dbRest as any).vegOnly;
-      delete (dbRest as any).costForTwo;
-      delete (dbRest as any).ambienceRating;
-      delete (dbRest as any).serviceRating;
-
-      let { error } = await supabase.from('restaurants').insert(dbRest);
-      while (
-        error
-        && removeMissingColumnsFromPayload(dbRest, error, ['photos', 'primary_photo_id', 'location_name', 'address', 'veg_only', 'ambience_rating', 'service_rating'])
-      ) {
-        const retry = await supabase.from('restaurants').insert(dbRest);
-        error = retry.error;
-      }
-      if (error) {
-          throw new Error(error.message);
-        }
-        set((state) => ({ restaurants: [...state.restaurants, normalizedRestaurant] }));
-      } finally {
-        set({ networkBusy: false });
-      }
-    },
+  set({ networkBusy: true });
+  try {
+    const created = await api.addRestaurant(restaurant);
+    const createdRestaurant = Array.isArray(created) ? created[0] : created;
+    set((state) => ({ restaurants: [...state.restaurants, createdRestaurant] }));
+  } finally {
+    set({ networkBusy: false });
+  }
+},
     updateRestaurant: async (id, updates) => {
       set({ networkBusy: true });
       try {
@@ -634,7 +501,7 @@ export const useStore = create<AppState>()(
           normalizedUpdates.photos = await Promise.all(
             normalizedUpdates.photos.map(async (photo) => {
               if (photo && photo.url && photo.url.startsWith('data:')) {
-                const url = await uploadImage(photo.url);
+                const url = await api.uploadImage(photo.url);
                 return { ...photo, url };
               }
               return photo;

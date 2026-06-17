@@ -314,6 +314,7 @@ export default function MapPage() {
   const ignoreCarouselSelectionTimeoutRef = useRef<number | null>(null);
   const restaurantPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const dishPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const isUploadingDishPhotosRef = useRef(false);
   const restaurantPhotoPreviewRef = useRef<HTMLDivElement | null>(null);
   const restaurantPhotoDragRef = useRef<{ startX: number; startY: number; x: number; y: number } | null>(null);
   const restaurantPhotoTouchRef = useRef<{
@@ -875,8 +876,19 @@ export default function MapPage() {
   };
 
   const handleDishPhotoUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const urls = await Promise.all(Array.from(files).map(fileToDataUrl));
+    if (!files || files.length === 0 || isUploadingDishPhotosRef.current) return;
+    isUploadingDishPhotosRef.current = true;
+    const selectedFiles = Array.from(files).filter((file, index, list) =>
+      list.findIndex((other) => other.name === file.name && other.size === file.size && other.lastModified === file.lastModified) === index
+    );
+    if (selectedFiles.length === 0) {
+      isUploadingDishPhotosRef.current = false;
+      return;
+    }
+    if (dishPhotoInputRef.current) {
+      dishPhotoInputRef.current.value = '';
+    }
+    const urls = await Promise.all(selectedFiles.map(fileToDataUrl));
     const today = new Date().toISOString().slice(0, 10);
     setDishPhotos((prev) => [
       ...prev,
@@ -896,9 +908,7 @@ export default function MapPage() {
         isCustomCuisine: false
       }))
     ]);
-    if (dishPhotoInputRef.current) {
-      dishPhotoInputRef.current.value = '';
-    }
+    isUploadingDishPhotosRef.current = false;
   };
 
   const addEmptyDishCard = () => {

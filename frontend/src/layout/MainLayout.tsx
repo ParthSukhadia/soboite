@@ -1,7 +1,7 @@
 import { useRef, useState, FormEvent, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { DatabaseZap, Download, Settings2, Upload, LogIn, LogOut, Lock, X, Menu, Eye, EyeOff, Loader2, RotateCw } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, hasSupabaseConfig } from '../lib/supabase';
 import { useStore } from '../store/useStore';
 
 interface ExportPayload {
@@ -138,6 +138,11 @@ export default function MainLayout() {
   };
 
   useEffect(() => {
+    if (!hasSupabaseConfig) {
+      console.log('Supabase realtime is disabled because env vars are missing.');
+      return;
+    }
+
     console.log("Setting up Supabase Realtime Postgres change channels...");
     const channel = supabase
       .channel('soboite-db-changes')

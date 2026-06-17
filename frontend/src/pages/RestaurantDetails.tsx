@@ -3,8 +3,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
+  ExternalLink,
   ImagePlus,
   Loader2,
+  Map as MapIcon,
   Pencil,
   Plus,
   Star,
@@ -1039,6 +1041,35 @@ export default function RestaurantDetails() {
             )}
           </div>
         )}
+
+        {/* Quick-action links — always visible */}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <a
+            id="btn-get-directions"
+            href={(() => {
+              const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+              return isIOS
+                ? `maps://maps.apple.com/?daddr=${restaurant.lat},${restaurant.lng}`
+                : `https://www.google.com/maps/dir/?api=1&destination=${restaurant.lat},${restaurant.lng}`;
+            })()}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors font-medium"
+          >
+            <MapIcon size={14} />
+            Get Directions
+          </a>
+          <a
+            id="btn-search-zomato"
+            href={`https://www.zomato.com/search?q=${encodeURIComponent(restaurant.name)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors font-medium"
+          >
+            <ExternalLink size={14} />
+            Search on Zomato
+          </a>
+        </div>
 
         {editMode && (
           <div className="mt-4">
