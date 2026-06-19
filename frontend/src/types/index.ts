@@ -13,7 +13,7 @@ export interface Restaurant {
   address?: string;
   vegOnly?: boolean;
   notes?: string;
-  imageUrl?: string;
+  imageStorageUrl?: string;
   photos?: PhotoEntry[];
   primaryPhotoId?: string;
   type?: string;
@@ -41,7 +41,7 @@ export interface Dish {
   review?: string;
   reviewDate?: string;
   reviews?: DishReview[];
-  imageUrl?: string;
+  imageStorageUrl?: string;
   photos?: PhotoEntry[];
   primaryPhotoId?: string;
   isRecommended?: boolean;

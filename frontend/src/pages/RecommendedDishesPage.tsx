@@ -342,7 +342,7 @@ export default function RecommendedDishesPage() {
                   <div className="grid gap-4 p-4 sm:grid-cols-[120px_minmax(0,1fr)]">
                     <div className="h-28 overflow-hidden rounded-3xl bg-gray-100">
                       <CachedImage
-                        src={dish.imageUrl || restaurant?.imageUrl || ''}
+                        src={dish.imageStorageUrl || restaurant?.imageStorageUrl || ''}
                         alt={dish.name}
                         className="h-full w-full object-cover"
                       />
@@ -362,7 +362,7 @@ export default function RecommendedDishesPage() {
                       <div className="flex flex-wrap gap-2 text-sm text-gray-500">
                         <span>Rating {dish.rating.toFixed(1)}</span>
                         {dish.actualPrice !== undefined && <span>₹{dish.actualPrice}</span>}
-                        <span>{'$'.repeat(dish.priceLevel)}</span>
+                        <span>{'₹'.repeat(dish.priceLevel)}</span>
                         {dish.cuisine && <span>{dish.cuisine}</span>}
                         {restaurant?.type && <span>{restaurant.type}</span>}
                         {dish.flavorTags?.map((tag) => (

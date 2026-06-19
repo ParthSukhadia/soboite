@@ -83,10 +83,14 @@ export default function MainLayout() {
     fetchData,
     editMode,
     setEditMode,
-    networkBusy
+    networkBusy,
+    isDarkMode,
+    setDarkMode
   } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showMobileAdmin, setShowMobileAdmin] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState(false);
@@ -101,6 +105,14 @@ export default function MainLayout() {
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -227,7 +239,7 @@ export default function MainLayout() {
           ?? 'id';
 
         for (const chunk of chunkArray(rows, CHUNK_SIZE)) {
-        await api.importTable(tableName, chunk, upsertKey);
+          await api.importTable(tableName, chunk, upsertKey);
         }
       }
 
@@ -407,7 +419,6 @@ export default function MainLayout() {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <p className="text-sm uppercase tracking-[0.2em] text-gray-500">Menu</p>
-                <h2 className="text-xl font-semibold">Mobile navigation</h2>
               </div>
               <button
                 type="button"
@@ -447,14 +458,11 @@ export default function MainLayout() {
               {editMode ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowSettings(true);
-                    setShowMobileMenu(false);
-                  }}
-                  className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+                  onClick={() => setShowMobileAdmin((prev) => !prev)}
+                  className="w-full inline-flex items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
                 >
-                  <Settings2 size={16} />
-                  Settings
+                  <span className="inline-flex items-center gap-2"><Settings2 size={16} /> Admin Settings</span>
+                  <span className="text-gray-400">{showMobileAdmin ? '▲' : '▼'}</span>
                 </button>
               ) : (
                 <button
@@ -470,20 +478,87 @@ export default function MainLayout() {
                 </button>
               )}
 
-              {editMode && (
+              {editMode && showMobileAdmin && (
+                <div className="pt-2 pb-4 space-y-2">
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={() => void exportAllData()}
+                    className="w-full inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Download size={14} /> Export all data
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={() => importFileRef.current?.click()}
+                    className="w-full inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Upload size={14} /> Import data
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={() => { clearTransactionalData(); setShowMobileMenu(false); }}
+                    className="w-full inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100"
+                  >
+                    <DatabaseZap size={14} /> Delete transactional data
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={() => { clearAllData(); setShowMobileMenu(false); }}
+                    className="w-full inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100"
+                  >
+                    <DatabaseZap size={14} /> Clear all data
+                  </button>
+                </div>
+              )}
+
+              <div className="pt-4 mt-4 border-t border-gray-100 space-y-2">
                 <button
                   type="button"
                   onClick={() => {
-                    setEditMode(false);
-                    setShowSettings(false);
-                    setShowMobileMenu(false);
+                    navigator.clipboard.writeText(window.location.href);
+                    setUrlCopied(true);
+                    setTimeout(() => setUrlCopied(false), 2000);
                   }}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition"
+                >
+                  <Upload size={16} />
+                  {urlCopied ? 'Copied!' : 'Copy App URL'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDarkMode(!isDarkMode)}
                   className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
                 >
-                  <LogOut size={16} />
-                  Logout
+                  <Settings2 size={16} />
+                  {isDarkMode ? 'Light Mode' : 'Dark Mode'}
                 </button>
+              </div>
+
+              {editMode && (
+                <div className="pt-4 mt-4 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditMode(false);
+                      setShowSettings(false);
+                      setShowMobileMenu(false);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                  >
+                    <LogOut size={16} />
+                    Logout
+                  </button>
+                </div>
               )}
+
+              <div className="pt-6 pb-2 text-center text-xs text-gray-400">
+                <p>Version 1.0.1</p>
+                <p>Made By Rishabh Masani</p>
+              </div>
             </div>
           </aside>
           <button
@@ -503,8 +578,8 @@ export default function MainLayout() {
                 <Lock size={20} className="text-red-500" />
                 Login
               </h2>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => {
                   setShowLoginModal(false);
                   setLoginPassword('');
@@ -519,7 +594,7 @@ export default function MainLayout() {
               <div className="mb-4">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Password</label>
                 <div className="relative">
-                  <input 
+                  <input
                     type={showPassword ? 'text' : 'password'}
                     autoFocus
                     required
@@ -541,7 +616,7 @@ export default function MainLayout() {
                 </div>
                 {loginError && <p className="text-red-500 text-xs mt-2 font-medium">Incorrect password. Please try again.</p>}
               </div>
-              <button 
+              <button
                 type="submit"
                 className="w-full bg-black text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition active:scale-95 flex items-center justify-center gap-2"
               >
@@ -559,8 +634,8 @@ export default function MainLayout() {
       {networkBusy && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-white/70 backdrop-blur-sm pointer-events-none">
           <div className="bg-white px-6 py-4 rounded-2xl shadow-xl flex items-center gap-3 animate-in fade-in zoom-in-95 duration-200">
-             <Loader2 size={24} className="animate-spin text-red-500" />
-             <span className="text-gray-800 font-semibold tracking-wide">Processing...</span>
+            <Loader2 size={24} className="animate-spin text-red-500" />
+            <span className="text-gray-800 font-semibold tracking-wide">Processing...</span>
           </div>
         </div>
       )}

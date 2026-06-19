@@ -186,3 +186,30 @@ html, body, #root {
   animation: shimmer 1.6s infinite linear;
 }
 
+.dark {
+  --color-white: #1f2937;
+  --color-gray-50: #111827;
+  --color-gray-100: #374151;
+  --color-gray-200: #4b5563;
+  --color-gray-300: #6b7280;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #d1d5db;
+  --color-gray-600: #e5e7eb;
+  --color-gray-700: #f3f4f6;
+  --color-gray-800: #f9fafb;
+  --color-gray-900: #ffffff;
+  --color-black: #ffffff;
+}
+
+.dark body {
+  background-color: var(--color-gray-50);
+  color: var(--color-gray-900);
+}
+
+.dark .leaflet-layer,
+.dark .leaflet-control-zoom-in,
+.dark .leaflet-control-zoom-out,
+.dark .leaflet-control-attribution {
+  filter: brightness(0.85) contrast(1.1);
+}
+

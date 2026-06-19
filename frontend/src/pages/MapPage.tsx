@@ -268,6 +268,7 @@ export default function MapPage() {
   const [filterCuisines, setFilterCuisines] = useState<string[]>([]);
   const [filterLocations, setFilterLocations] = useState<string[]>([]);
   const [filterMood, setFilterMood] = useState<string | null>(null);
+  const [filterRating, setFilterRating] = useState<number | null>(null);
   const [isMoodMenuOpen, setIsMoodMenuOpen] = useState(true);
   const [showNoMatchToast, setShowNoMatchToast] = useState(false);
   const [filterVegOnly, setFilterVegOnly] = useState(false);
@@ -294,7 +295,7 @@ export default function MapPage() {
   const [isGeocodingAddress, setIsGeocodingAddress] = useState(false);
   const [dishPhotos, setDishPhotos] = useState<Array<{
     id: string;
-    imageUrl: string;
+    imageStorageUrl: string;
     photoPosition: { x: number; y: number };
     photoZoom: number;
     name: string;
@@ -413,7 +414,11 @@ export default function MapPage() {
 
     const bootstrap = async () => {
       try {
-        await fetchData();
+        const { lastFetch } = useStore.getState();
+        const shouldFetch = !lastFetch || (Date.now() - lastFetch > 5 * 60 * 1000);
+        if (shouldFetch) {
+          await fetchData();
+        }
       } finally {
         if (active) {
           setIsBootstrappingData(false);
@@ -496,7 +501,10 @@ export default function MapPage() {
         && (minCost === null || costValue >= minCost)
         && (maxCost === null || costValue <= maxCost));
 
-    return matchesType && matchesCuisine && matchesLocation && matchesMood && matchesVegOnly && matchesCost;
+    const restRating = ratingsByRestaurant.get(restaurant.id) ?? 0;
+    const matchesRating = filterRating === null || restRating >= filterRating;
+
+    return matchesType && matchesCuisine && matchesLocation && matchesMood && matchesVegOnly && matchesCost && matchesRating;
   };
 
   const toggleTypeFilter = (value: string) => {
@@ -518,6 +526,7 @@ export default function MapPage() {
     setFilterMood(null);
     setFilterVegOnly(false);
     setCostRange({ min: '', max: '' });
+    setFilterRating(null);
   };
 
   const fileToDataUrl = (file: File) => optimizeImage(file);
@@ -810,12 +819,12 @@ export default function MapPage() {
   };
 
   const buildPositionedDishPhoto = async (
-    imageUrl: string,
+    imageStorageUrl: string,
     photoPosition: { x: number; y: number },
     photoZoom: number
   ) => {
     const image = new Image();
-    image.src = imageUrl;
+    image.src = imageStorageUrl;
     await image.decode();
 
     const targetWidth = 1200;
@@ -845,7 +854,7 @@ export default function MapPage() {
     canvas.width = targetWidth;
     canvas.height = targetHeight;
     const context = canvas.getContext('2d');
-    if (!context) return imageUrl;
+    if (!context) return imageStorageUrl;
 
     context.drawImage(
       image,
@@ -894,7 +903,7 @@ export default function MapPage() {
       ...prev,
       ...urls.map((url) => ({
         id: createId(),
-        imageUrl: url,
+        imageStorageUrl: url,
         photoPosition: { x: 50, y: 50 },
         photoZoom: 1,
         name: '',
@@ -917,7 +926,7 @@ export default function MapPage() {
       ...prev,
       {
         id: createId(),
-        imageUrl: '',
+        imageStorageUrl: '',
         photoPosition: { x: 50, y: 50 },
         photoZoom: 1,
         name: '',
@@ -943,7 +952,7 @@ export default function MapPage() {
 
   const handleDishPhotoPointerDown = (id: string, event: React.PointerEvent<HTMLDivElement>) => {
     const dish = dishPhotos.find((item) => item.id === id);
-    if (!dish || !dish.imageUrl) return;
+    if (!dish || !dish.imageStorageUrl) return;
 
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1002,7 +1011,7 @@ export default function MapPage() {
 
   const handleDishPhotoTouchStart = (id: string, event: React.TouchEvent<HTMLDivElement>) => {
     const dish = dishPhotos.find((item) => item.id === id);
-    if (!dish || !dish.imageUrl) return;
+    if (!dish || !dish.imageStorageUrl) return;
 
     if (event.touches.length === 1) {
       const touch = event.touches[0];
@@ -1277,7 +1286,7 @@ export default function MapPage() {
 
     const invalidDish = dishPhotos.find((dish) => {
       const hasAnyContent = Boolean(
-        dish.name.trim() || dish.review.trim() || dish.imageUrl || dish.cuisine.trim() || dish.actualPrice.trim() || dish.flavorTags.length > 0
+        dish.name.trim() || dish.review.trim() || dish.imageStorageUrl || dish.cuisine.trim() || dish.actualPrice.trim() || dish.flavorTags.length > 0
       );
       if (!hasAnyContent) return false;
       return !dish.name.trim() || !dish.review.trim();
@@ -1310,7 +1319,7 @@ export default function MapPage() {
         locationName: locationName || undefined,
         address: address || undefined,
         notes,
-        imageUrl: positionedRestaurantPhoto || restaurantPhoto || undefined,
+        imageStorageUrl: positionedRestaurantPhoto || restaurantPhoto || undefined,
         type: type || undefined,
         cuisine: cuisine || undefined,
         costForTwo: Number.isFinite(costForTwo) ? costForTwo : undefined,
@@ -1324,8 +1333,8 @@ export default function MapPage() {
         const parsedActualPrice = dish.actualPrice ? Number(dish.actualPrice) : Number.NaN;
         const reviewText = dish.review.trim();
         const reviewDate = dish.reviewDate || new Date().toISOString().slice(0, 10);
-        const positionedDishPhoto = dish.imageUrl
-          ? await buildPositionedDishPhoto(dish.imageUrl, dish.photoPosition, dish.photoZoom)
+        const positionedDishPhoto = dish.imageStorageUrl
+          ? await buildPositionedDishPhoto(dish.imageStorageUrl, dish.photoPosition, dish.photoZoom)
           : undefined;
         if (dish.cuisine) {
           await ensureCuisine(dish.cuisine);
@@ -1345,7 +1354,7 @@ export default function MapPage() {
           reviews: [{ id: createId(), text: reviewText, date: reviewDate, createdAt: Date.now() }],
           cuisine: dish.cuisine || undefined,
           flavorTags: tags.length > 0 ? tags : undefined,
-          imageUrl: positionedDishPhoto || dish.imageUrl || undefined
+          imageStorageUrl: positionedDishPhoto || dish.imageStorageUrl || undefined
         });
       }
 
@@ -1616,6 +1625,25 @@ export default function MapPage() {
                   </div>
                 </div>
                 <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 mb-2">Rating</label>
+                  <div className="flex flex-wrap gap-2">
+                    {[4, 3, 2, 1].map((stars) => {
+                      const isActive = filterRating === stars;
+                      return (
+                        <button
+                          key={stars}
+                          type="button"
+                          disabled={isApiBusy}
+                          onClick={() => setFilterRating(isActive ? null : stars)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed ${isActive ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}
+                        >
+                          {stars}+ ⭐
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
                   <label className="block text-[11px] font-semibold text-gray-500 mb-2">Location</label>
                   <div className="flex flex-wrap gap-2">
                     {locationOptions.map((location) => {
@@ -1817,9 +1845,9 @@ export default function MapPage() {
                       className="w-full h-full text-left flex flex-col cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
                     >
                       <div className="relative h-full">
-                        {rest.imageUrl ? (
+                        {rest.imageStorageUrl ? (
                           <CachedImage
-                            src={rest.imageUrl}
+                            src={rest.imageStorageUrl}
                             alt={rest.name}
                             className="w-full h-full object-cover"
                             onError={(e) => { e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3Crect width='1' height='1' fill='%23e5e7eb'/%3E%3C/svg%3E"; }}
@@ -1992,14 +2020,37 @@ export default function MapPage() {
                   <div className="flex gap-2">
                     <button
                       type="button"
+                      disabled={isGeocodingAddress}
                       onClick={() => {
                         if (validCurrentPosition) {
                           setLatLngSafely(validCurrentPosition);
+                        } else if (navigator.geolocation) {
+                          setIsGeocodingAddress(true);
+                          setAddFormError(null);
+                          navigator.geolocation.getCurrentPosition(
+                            (position) => {
+                              const pos = L.latLng(position.coords.latitude, position.coords.longitude);
+                              setLatLngSafely(pos);
+                              setCurrentPosition(pos);
+                              setIsGeocodingAddress(false);
+                            },
+                            (err) => {
+                              let msg = err.message || 'Unable to fetch GPS location.';
+                              if (msg.includes('secure origins') || msg.includes('Only secure origins')) {
+                                msg = 'GPS requires HTTPS or localhost. Please type your address manually.';
+                              }
+                              setAddFormError(msg);
+                              setIsGeocodingAddress(false);
+                            },
+                            { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+                          );
+                        } else {
+                          setAddFormError('Geolocation is not supported by this browser.');
                         }
                       }}
-                      className="flex-1 bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200 text-sm"
+                      className="flex-1 bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Use GPS location
+                      {isGeocodingAddress ? 'Wait...' : 'Use GPS location'}
                     </button>
                     <button
                       type="button"
@@ -2188,7 +2239,7 @@ export default function MapPage() {
                           <div className="space-y-3">
                             {dishPhotos.map((dish) => (
                               <div key={dish.id} className="border border-gray-200 rounded-xl p-3 space-y-3">
-                                {dish.imageUrl && (
+                                {dish.imageStorageUrl && (
                                   <div
                                     className={`w-full rounded-lg overflow-hidden relative [touch-action:none] ${draggingDishPhotoId === dish.id ? 'cursor-grabbing' : 'cursor-grab'}`}
                                     style={{ height: '12rem' }}
@@ -2201,7 +2252,7 @@ export default function MapPage() {
                                     onTouchEnd={(event) => handleDishPhotoTouchEnd(dish.id, event)}
                                   >
                                     <CachedImage
-                                      src={dish.imageUrl}
+                                      src={dish.imageStorageUrl}
                                       alt="Dish"
                                       className="w-full h-full object-cover pointer-events-none select-none"
                                       style={{ objectPosition: `${dish.photoPosition.x}% ${dish.photoPosition.y}%`, transform: `scale(${dish.photoZoom})` }}
@@ -2212,7 +2263,7 @@ export default function MapPage() {
                                       onClick={(event) => {
                                         event.stopPropagation();
                                         updateDishCard(dish.id, {
-                                          imageUrl: '',
+                                          imageStorageUrl: '',
                                           photoPosition: { x: 50, y: 50 },
                                           photoZoom: 1
                                         });

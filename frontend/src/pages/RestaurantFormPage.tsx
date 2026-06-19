@@ -99,7 +99,11 @@ const getPreciseCurrentLocation = () => new Promise<L.LatLng>((resolve, reject) 
       resolve(normalized);
     },
     (error) => {
-      reject(new Error(error.message));
+      let msg = error.message;
+      if (msg.includes('secure origins') || msg.includes('Only secure origins')) {
+        msg = 'GPS requires HTTPS or localhost. Please type your address manually.';
+      }
+      reject(new Error(msg));
     },
     {
       enableHighAccuracy: true,

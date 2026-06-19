@@ -39,7 +39,7 @@ return c.json(data);
 // Get all dishes
 app.get('/api/dishes', async (c) => {
   const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('dishes').select('id, name, restaurant_id, rating, price_level, actual_price, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, created_at')
+  const { data, error } = await supabase.from('dishes').select('id, name, restaurant_id, rating, price_level, actual_price, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url')
   if (error) return c.json({ error: error.message }, 500)
 return c.json(data);
 })
@@ -104,8 +104,6 @@ app.delete('/api/restaurants/:id', async (c) => {
 app.post('/api/dishes', async (c) => {
   const supabase = getSupabase(c)
   let body = normalizeRequestBody(await c.req.json())
-  // Remove any stray image_url field that might be present
-  delete body.image_url
   const { error, data } = await supabase.from('dishes').insert(body)
   if (error) return c.json({ error: error.message }, 500)
   // Return inserted row without selecting missing columns
@@ -116,8 +114,6 @@ app.put('/api/dishes/:id', async (c) => {
   const supabase = getSupabase(c)
   const id = c.req.param('id')
   let updates = normalizeRequestBody(await c.req.json())
-  // Remove stray image_url before update
-  delete updates.image_url
   const { error, data } = await supabase.from('dishes').update(updates).eq('id', id)
   if (error) return c.json({ error: error.message }, 500)
   // Return updated row without selecting missing columns

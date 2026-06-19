@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-// .wrangler/tmp/bundle-R8C6yE/checked-fetch.js
+// .wrangler/tmp/bundle-PSuRVg/checked-fetch.js
 var urls = /* @__PURE__ */ new Set();
 function checkURL(request, init) {
   const url = request instanceof URL ? request : new URL(
@@ -23670,7 +23670,7 @@ app.get("/api/restaurants", async (c) => {
 });
 app.get("/api/dishes", async (c) => {
   const supabase = getSupabase(c);
-  const { data, error } = await supabase.from("dishes").select("id, name, restaurant_id, rating, price_level, actual_price, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, created_at");
+  const { data, error } = await supabase.from("dishes").select("id, name, restaurant_id, rating, price_level, actual_price, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url");
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
 });
@@ -23720,7 +23720,6 @@ app.delete("/api/restaurants/:id", async (c) => {
 app.post("/api/dishes", async (c) => {
   const supabase = getSupabase(c);
   let body = normalizeRequestBody(await c.req.json());
-  delete body.image_url;
   const { error, data } = await supabase.from("dishes").insert(body);
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data?.[0] ?? {});
@@ -23729,7 +23728,6 @@ app.put("/api/dishes/:id", async (c) => {
   const supabase = getSupabase(c);
   const id = c.req.param("id");
   let updates = normalizeRequestBody(await c.req.json());
-  delete updates.image_url;
   const { error, data } = await supabase.from("dishes").update(updates).eq("id", id);
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data?.[0] ?? {});
@@ -23888,7 +23886,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-R8C6yE/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-PSuRVg/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -23920,7 +23918,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-R8C6yE/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-PSuRVg/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

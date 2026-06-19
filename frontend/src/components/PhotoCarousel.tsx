@@ -42,16 +42,17 @@ export default function PhotoCarousel({
   } | null>(null);
 
   const safePhotos = useMemo(() => photos.filter((photo) => Boolean(photo.url)), [photos]);
-  const activePhoto = safePhotos[index];
+  const clampedIndex = Math.max(0, Math.min(index, safePhotos.length - 1));
+  const activePhoto = safePhotos[clampedIndex];
 
   const showPrevious = () => setIndex((prev) => (prev - 1 + safePhotos.length) % safePhotos.length);
   const showNext = () => setIndex((prev) => (prev + 1) % safePhotos.length);
 
   useEffect(() => {
-    if (index > safePhotos.length - 1) {
-      setIndex(Math.max(0, safePhotos.length - 1));
+    if (index !== clampedIndex) {
+      setIndex(clampedIndex);
     }
-  }, [index, safePhotos.length]);
+  }, [index, clampedIndex]);
 
   useEffect(() => {
     setScale(1);
@@ -279,7 +280,7 @@ if (safePhotos.length > 1 && scale <= 1.02 && Math.abs(deltaX) > 40 && Math.abs(
             <ChevronRight size={14} />
           </button>
           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/50 text-white text-[11px] px-2 py-0.5">
-            {index + 1}/{safePhotos.length}
+            {clampedIndex + 1}/{safePhotos.length}
           </div>
         </>
       )}

@@ -199,7 +199,7 @@ export default function TopPicksPage() {
                   <div className="grid gap-4 p-4 md:grid-cols-[220px_minmax(0,1fr)]">
                     <div className="relative overflow-hidden rounded-3xl bg-gray-100">
                       <CachedImage
-                        src={restaurant.imageUrl || restaurant.photos?.[0]?.url || ''}
+                        src={restaurant.imageStorageUrl || restaurant.photos?.[0]?.url || ''}
                         alt={restaurant.name}
                         className="h-full w-full min-h-[180px] object-cover"
                       />
@@ -240,7 +240,7 @@ export default function TopPicksPage() {
                             <div className="flex items-start gap-4">
                               <div className="h-16 w-16 overflow-hidden rounded-3xl bg-gray-100">
                                 <CachedImage
-                                  src={dish.imageUrl || restaurant.imageUrl || ''}
+                                  src={dish.imageStorageUrl || restaurant.imageStorageUrl || ''}
                                   alt={dish.name}
                                   className="h-full w-full object-cover"
                                 />

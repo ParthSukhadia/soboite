@@ -194,9 +194,9 @@ export default function RestaurantDetails() {
   const needsPhotoFetch = useMemo(() => {
     if (!id) return false;
     if (!restaurant) return true;
-    const restaurantNeedsRefresh = !restaurant.photos?.length && !restaurant.imageUrl;
+    const restaurantNeedsRefresh = !restaurant.photos?.length && !restaurant.imageStorageUrl;
     const dishesNeedRefresh = restaurantDishes.some(
-      (dish) => !dish.photos?.length && !dish.imageUrl,
+      (dish) => !dish.photos?.length && !dish.imageStorageUrl,
     );
     return restaurantNeedsRefresh || dishesNeedRefresh;
   }, [id, restaurant, restaurantDishes]);
@@ -398,7 +398,7 @@ export default function RestaurantDetails() {
     return urls.map((url) => ({ id: createId(), url, uploadedAt: now }));
   };
 
-  const restaurantPhotos = asPhotos(restaurant.photos, restaurant.imageUrl);
+  const restaurantPhotos = asPhotos(restaurant.photos, restaurant.imageStorageUrl);
   const restaurantPrimaryPhotoId = resolvePrimaryPhotoId(
     restaurantPhotos,
     restaurant.primaryPhotoId,
@@ -415,7 +415,7 @@ export default function RestaurantDetails() {
     await updateRestaurant(restaurant.id, {
       photos: photos.length > 0 ? photos : undefined,
       primaryPhotoId: nextPrimaryPhotoId,
-      imageUrl: resolvePrimaryPhotoUrl(photos, nextPrimaryPhotoId) ?? "",
+      imageStorageUrl: resolvePrimaryPhotoUrl(photos, nextPrimaryPhotoId) ?? "",
     });
   };
 
@@ -554,7 +554,7 @@ export default function RestaurantDetails() {
   };
 
   const openEditDish = (dish: Dish) => {
-    const photos = asPhotos(dish.photos, dish.imageUrl);
+    const photos = asPhotos(dish.photos, dish.imageStorageUrl);
     const reviews = getDishReviews(dish);
     setEditingDishId(dish.id);
     setEditingDishDraft({
@@ -677,7 +677,7 @@ export default function RestaurantDetails() {
         const photo = newDishPhotos.find((p) => p.id === entry.photoId);
         const photos = photo ? [photo] : [];
         const primaryPhotoId = photo?.id;
-        const imageUrl = photo?.url;
+        const imageStorageUrl = photo?.url;
 
         const parsedActualPrice = entry.actualPrice ? Number(entry.actualPrice) : Number.NaN;
         await addDish({
@@ -697,7 +697,7 @@ export default function RestaurantDetails() {
               createdAt: Date.now(),
             },
           ],
-          imageUrl,
+          imageStorageUrl,
           photos: photos.length > 0 ? photos : undefined,
           primaryPhotoId,
           isRecommended: Boolean(entry.isRecommended),
@@ -748,7 +748,7 @@ export default function RestaurantDetails() {
         photos,
         editingDishDraft.primaryPhotoId,
       );
-      const imageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId);
+      const imageStorageUrl = resolvePrimaryPhotoUrl(photos, primaryPhotoId);
 
       const parsedActualPrice = editingDishDraft.actualPrice
         ? Number(editingDishDraft.actualPrice)
@@ -784,7 +784,7 @@ export default function RestaurantDetails() {
           editingDishDraft.tags.length > 0 ? editingDishDraft.tags : undefined,
         photos: photos.length > 0 ? photos : undefined,
         primaryPhotoId,
-        imageUrl,
+        imageStorageUrl,
         isRecommended: editingDishDraft.isRecommended,
       });
 
@@ -863,7 +863,7 @@ export default function RestaurantDetails() {
         newDishPhotos,
         newDishPrimaryPhotoId,
       );
-      const imageUrl = resolvePrimaryPhotoUrl(newDishPhotos, primaryPhotoId);
+      const imageStorageUrl = resolvePrimaryPhotoUrl(newDishPhotos, primaryPhotoId);
 
       await addDish({
         id: createId(),
@@ -884,7 +884,7 @@ export default function RestaurantDetails() {
             createdAt: Date.now(),
           },
         ],
-        imageUrl,
+        imageStorageUrl,
         photos: newDishPhotos.length > 0 ? newDishPhotos : undefined,
         primaryPhotoId,
         isRecommended: Boolean(data.isRecommended),
@@ -1184,7 +1184,7 @@ export default function RestaurantDetails() {
         {sectionedDishes.length > 0 && (
           <div className="grid grid-cols-1 gap-4 px-2 mb-8">
             {sectionedDishes.map((dish) => {
-              const dishPhotos = asPhotos(dish.photos, dish.imageUrl);
+              const dishPhotos = asPhotos(dish.photos, dish.imageStorageUrl);
               const primaryDishPhotoId = resolvePrimaryPhotoId(
                 dishPhotos,
                 dish.primaryPhotoId,
