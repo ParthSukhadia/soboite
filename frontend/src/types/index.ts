@@ -2,6 +2,7 @@ export interface PhotoEntry {
   id: string;
   url: string;
   uploadedAt: string;
+  type?: 'image' | 'video';
 }
 
 export interface Restaurant {
@@ -22,6 +23,7 @@ export interface Restaurant {
   ambienceRating?: number;
   serviceRating?: number;
   createdAt?: number;
+  likeCount?: number;
 }
 
 export interface DishReview {
@@ -47,4 +49,18 @@ export interface Dish {
   isRecommended?: boolean;
   cuisine?: string;
   flavorTags?: string[];
+  likeCount?: number;
+}
+
+export interface TopPickCategory {
+  id: string;
+  name: string;
+  created_at?: string;
+}
+
+export interface TopPickRestaurant {
+  id: string;
+  category_id: string;
+  restaurant_id: string;
+  position: number;
 }

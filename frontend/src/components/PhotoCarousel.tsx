@@ -237,14 +237,30 @@ if (safePhotos.length > 1 && scale <= 1.02 && Math.abs(deltaX) > 40 && Math.abs(
             <ImageOff size={48} />
           </div>
         ) : (
-          <CachedImage
-            src={activePhoto.url}
-            alt="Photo"
-            className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none"
-            style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
-            draggable={false}
-            onError={() => setImageError(true)}
-          />
+          (() => {
+            const isVideo = activePhoto.type === 'video' || activePhoto.url.startsWith('data:video/') || activePhoto.url.match(/\.(mp4|webm|mov|ogg)$/i);
+            return isVideo ? (
+              <video
+                src={activePhoto.url}
+                className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none"
+                style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+                autoPlay
+                muted
+                loop
+                playsInline
+                onError={() => setImageError(true)}
+              />
+            ) : (
+              <CachedImage
+                src={activePhoto.url}
+                alt="Photo"
+                className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none"
+                style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+                draggable={false}
+                onError={() => setImageError(true)}
+              />
+            );
+          })()
         )}
       </div>
 

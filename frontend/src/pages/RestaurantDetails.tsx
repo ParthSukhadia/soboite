@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import React, { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -11,6 +11,9 @@ import {
   Plus,
   Star,
   Trash2,
+  ThumbsUp,
+  ThumbsDown,
+  X,
 } from "lucide-react";
 import { useForm as useRHForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -22,6 +25,7 @@ import CachedImage from "../components/CachedImage";
 import { useStore } from "../store/useStore";
 import { Dish, DishReview, PhotoEntry } from "../types";
 import { optimizeImage } from "../lib/imageOptimization";
+import { api } from "../api";
 
 const dishSchema = z.object({
   name: z.string().trim().min(1, "Dish name is required"),
@@ -82,18 +86,32 @@ const createId = () => {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 };
 
+const isVideoUrl = (url?: string, type?: string) => {
+  if (!url) return false;
+  return type === 'video' || url.startsWith('data:video/') || !!url.match(/\.(mp4|webm|mov|ogg)$/i);
+};
+
 const asPhotos = (
   photos?: PhotoEntry[],
   fallbackUrl?: string,
 ): PhotoEntry[] => {
   const valid = (photos ?? []).filter((photo) => Boolean(photo.url));
-  if (valid.length > 0) return valid;
+  if (valid.length > 0) {
+    return valid.sort((a, b) => {
+      const aVid = isVideoUrl(a.url, a.type);
+      const bVid = isVideoUrl(b.url, b.type);
+      if (aVid && !bVid) return -1;
+      if (!aVid && bVid) return 1;
+      return 0;
+    });
+  }
   if (!fallbackUrl) return [];
   return [
     {
       id: `legacy-${fallbackUrl.slice(0, 24)}`,
       url: fallbackUrl,
       uploadedAt: new Date().toISOString(),
+      type: isVideoUrl(fallbackUrl) ? 'video' : 'image'
     },
   ];
 };
@@ -123,6 +141,15 @@ const averageRating = (values: Array<number | undefined>) => {
   return Math.round(average * 10) / 10;
 };
 
+const getLikeText = (hasLiked: boolean | null | undefined, count: number) => {
+  if (hasLiked) {
+    if (count > 1) return `You as well as ${count - 1} other${count - 1 > 1 ? 's' : ''} like this`;
+    return "You like this";
+  }
+  if (count > 0) return `${count} ${count === 1 ? 'person likes' : 'people like'} this`;
+  return null;
+};
+
 export default function RestaurantDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -142,7 +169,30 @@ export default function RestaurantDetails() {
     deleteRestaurant,
     ensureCuisine,
     ensureFlavorTag,
+    restaurantLikes,
+    dishLikes,
+    toggleRestaurantLike,
+    toggleDishLike,
+    deviceId
   } = useStore();
+
+  const [likesModal, setLikesModal] = useState<{ isOpen: boolean; type: 'restaurant' | 'dish'; id: string } | null>(null);
+  const [likesList, setLikesList] = useState<string[]>([]);
+  const [isLoadingLikes, setIsLoadingLikes] = useState(false);
+
+  const openLikesList = async (targetId: string, type: 'restaurant' | 'dish') => {
+    setLikesModal({ isOpen: true, type, id: targetId });
+    setIsLoadingLikes(true);
+    setLikesList([]);
+    try {
+      const data = type === 'restaurant' ? await api.getRestaurantLikes(targetId) : await api.getDishLikes(targetId);
+      setLikesList(data.names);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoadingLikes(false);
+    }
+  };
 
   const restaurant = restaurants.find((entry) => entry.id === id);
 
@@ -393,9 +443,15 @@ export default function RestaurantDetails() {
     files: FileList | File[] | null,
   ): Promise<PhotoEntry[]> => {
     if (!files || files.length === 0) return [];
-    const urls = await Promise.all(Array.from(files).map((file) => optimizeImage(file)));
+    const fileArray = Array.from(files);
+    const urls = await Promise.all(fileArray.map((file) => optimizeImage(file)));
     const now = new Date().toISOString();
-    return urls.map((url) => ({ id: createId(), url, uploadedAt: now }));
+    return urls.map((url, index) => ({ 
+      id: createId(), 
+      url, 
+      uploadedAt: now,
+      type: fileArray[index].type.startsWith('video/') ? 'video' : 'image'
+    }));
   };
 
   const restaurantPhotos = asPhotos(restaurant.photos, restaurant.imageStorageUrl);
@@ -955,7 +1011,7 @@ export default function RestaurantDetails() {
               <input
                 ref={restaurantPhotoInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,video/*"
                 multiple
                 onChange={(event) =>
                   handleRestaurantPhotoUpload(event.target.files)
@@ -994,9 +1050,40 @@ export default function RestaurantDetails() {
             )}
           </button>
         )}
-        <h1 className="text-3xl font-extrabold text-gray-900">
-          {restaurant.name}
-        </h1>
+        {deviceId && (
+          <div className="flex flex-col items-start gap-1 shrink-0 mb-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => toggleRestaurantLike(restaurant.id, restaurantLikes[restaurant.id] === true ? null : true)}
+                className={`p-2 rounded-full border transition ${restaurantLikes[restaurant.id] === true ? 'bg-green-100 text-green-700 border-green-300' : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'}`}
+                title="Like"
+              >
+                <ThumbsUp size={16} fill={restaurantLikes[restaurant.id] === true ? 'currentColor' : 'none'} />
+              </button>
+              <button
+                onClick={() => toggleRestaurantLike(restaurant.id, restaurantLikes[restaurant.id] === false ? null : false)}
+                className={`p-2 rounded-full border transition ${restaurantLikes[restaurant.id] === false ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'}`}
+                title="Dislike"
+              >
+                <ThumbsDown size={16} fill={restaurantLikes[restaurant.id] === false ? 'currentColor' : 'none'} />
+              </button>
+            </div>
+            {getLikeText(restaurantLikes[restaurant.id], restaurant.likeCount || 0) && (
+              <button
+                disabled={!editMode || (restaurant.likeCount || 0) === 0}
+                onClick={() => openLikesList(restaurant.id, 'restaurant')}
+                className={`text-[11px] text-gray-500 font-medium ${editMode && (restaurant.likeCount || 0) > 0 ? 'hover:text-blue-500 hover:underline cursor-pointer' : ''} text-left`}
+              >
+                {getLikeText(restaurantLikes[restaurant.id], restaurant.likeCount || 0)}
+              </button>
+            )}
+          </div>
+        )}
+        <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
+          <h1 className="text-3xl font-extrabold text-gray-900 pr-4">
+            {restaurant.name}
+          </h1>
+        </div>
         {typeof overallRating === "number" && (
           <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-900 border border-amber-200">
             <Star size={14} fill="currentColor" />
@@ -1043,7 +1130,7 @@ export default function RestaurantDetails() {
         )}
 
         {/* Quick-action links — always visible */}
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-4 flex flex-wrap gap-2 items-center">
           <a
             id="btn-get-directions"
             href={(() => {
@@ -1069,6 +1156,8 @@ export default function RestaurantDetails() {
             <ExternalLink size={14} />
             Search on Zomato
           </a>
+
+
         </div>
 
         {editMode && (
@@ -1183,19 +1272,30 @@ export default function RestaurantDetails() {
 
         {sectionedDishes.length > 0 && (
           <div className="grid grid-cols-1 gap-4 px-2 mb-8">
-            {sectionedDishes.map((dish) => {
+            {sectionedDishes.map((dish, index) => {
               const dishPhotos = asPhotos(dish.photos, dish.imageStorageUrl);
               const primaryDishPhotoId = resolvePrimaryPhotoId(
                 dishPhotos,
                 dish.primaryPhotoId,
               );
               const isEditing = editingDishId === dish.id && editingDishDraft;
+              
+              const isFirstRecommended = index === 0 && dish.isRecommended;
+              const isFirstOther = index === recommendedDishes.length;
 
               return (
-                <div
-                  key={dish.id}
-                  className="w-full"
-                >
+                <React.Fragment key={dish.id}>
+                  {isFirstRecommended && (
+                    <div className="col-span-1 pt-2 pb-1">
+                      <h2 className="text-2xl font-bold text-amber-600">What you should definetely eat here!</h2>
+                    </div>
+                  )}
+                  {isFirstOther && recommendedDishes.length > 0 && (
+                    <div className="col-span-1 pt-6 pb-1">
+                      <h2 className="text-xl font-bold text-gray-800">Other Dishes</h2>
+                    </div>
+                  )}
+                  <div className="w-full">
                   <motion.div
                     layout
                     className={`bg-white rounded-2xl p-5 shadow-[0_2px_10px_rgba(0,0,0,0.04)] border relative group transition-all duration-200 ${dish.isRecommended ? "border-amber-200 bg-gradient-to-br from-white via-white to-amber-50/15" : "border-gray-100"}`}
@@ -1283,7 +1383,36 @@ export default function RestaurantDetails() {
                       ) : null}
 
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-3 mb-2 pr-28">
+                          {deviceId && (
+                            <div className="flex flex-col items-start gap-1 shrink-0 mb-3">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => toggleDishLike(dish.id, dishLikes[dish.id] === true ? null : true)}
+                                  className={`p-1.5 rounded-full border transition ${dishLikes[dish.id] === true ? 'bg-green-100 text-green-700 border-green-300' : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'}`}
+                                  title="Like"
+                                >
+                                  <ThumbsUp size={14} fill={dishLikes[dish.id] === true ? 'currentColor' : 'none'} />
+                                </button>
+                                <button
+                                  onClick={() => toggleDishLike(dish.id, dishLikes[dish.id] === false ? null : false)}
+                                  className={`p-1.5 rounded-full border transition ${dishLikes[dish.id] === false ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'}`}
+                                  title="Dislike"
+                                >
+                                  <ThumbsDown size={14} fill={dishLikes[dish.id] === false ? 'currentColor' : 'none'} />
+                                </button>
+                              </div>
+                              {getLikeText(dishLikes[dish.id], dish.likeCount || 0) && (
+                                <button
+                                  disabled={!editMode || (dish.likeCount || 0) === 0}
+                                  onClick={() => openLikesList(dish.id, 'dish')}
+                                  className={`text-[10px] text-gray-500 font-medium ${editMode && (dish.likeCount || 0) > 0 ? 'hover:text-blue-500 hover:underline cursor-pointer' : ''} text-left`}
+                                >
+                                  {getLikeText(dishLikes[dish.id], dish.likeCount || 0)}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        <div className="flex items-start justify-between gap-3 mb-2">
                           <h3 className="text-lg font-bold text-gray-900 leading-tight flex flex-wrap items-center gap-2">
                             {dish.name}
                             {dish.isRecommended && (
@@ -1374,6 +1503,8 @@ export default function RestaurantDetails() {
                             ))}
                           </div>
                         )}
+
+
 
 
                       </div>
@@ -1561,7 +1692,7 @@ export default function RestaurantDetails() {
                           <input
                             ref={editDishPhotoInputRef}
                             type="file"
-                            accept="image/*"
+                            accept="image/*,video/*"
                             multiple
                             onChange={(event) =>
                               addPhotosToEditingDish(event.target.files)
@@ -1618,7 +1749,8 @@ export default function RestaurantDetails() {
                       </div>
                     )}
                   </motion.div>
-                </div>
+                  </div>
+                </React.Fragment>
               );
             })}
           </div>
@@ -1798,7 +1930,7 @@ export default function RestaurantDetails() {
                   <input
                     ref={dishPhotoInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/*,video/*"
                     multiple
                     onChange={(event) =>
                       handleAddDishPhotos(event.target.files)
@@ -1974,7 +2106,7 @@ export default function RestaurantDetails() {
                     <input
                       ref={dishPhotoInputRef}
                       type="file"
-                      accept="image/*"
+                      accept="image/*,video/*"
                       multiple
                       onChange={(event) =>
                         handleAddDishPhotos(event.target.files)
@@ -2313,6 +2445,54 @@ export default function RestaurantDetails() {
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {likesModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[5000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden flex flex-col max-h-[80vh]"
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                <h3 className="font-bold text-gray-900">Likes</h3>
+                <button
+                  onClick={() => setLikesModal(null)}
+                  className="p-2 -mr-2 rounded-full hover:bg-gray-100 text-gray-500"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="p-5 overflow-y-auto flex-1">
+                {isLoadingLikes ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 size={24} className="animate-spin text-gray-400" />
+                  </div>
+                ) : likesList.length > 0 ? (
+                  <ul className="space-y-3">
+                    {likesList.map((name, i) => (
+                      <li key={i} className="flex items-center gap-3 text-sm font-medium text-gray-800">
+                        <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
+                          {name.charAt(0).toUpperCase()}
+                        </div>
+                        {name}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-center text-gray-500 py-4 text-sm">No likes yet.</p>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

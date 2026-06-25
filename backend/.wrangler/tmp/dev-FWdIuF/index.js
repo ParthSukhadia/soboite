@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-// .wrangler/tmp/bundle-PSuRVg/checked-fetch.js
+// .wrangler/tmp/bundle-9CEkwX/checked-fetch.js
 var urls = /* @__PURE__ */ new Set();
 function checkURL(request, init) {
   const url = request instanceof URL ? request : new URL(
@@ -23664,13 +23664,13 @@ app.get("/", (c) => c.text("Supabase backend running. Use /health or /api/* endp
 app.get("/health", (c) => c.text("OK"));
 app.get("/api/restaurants", async (c) => {
   const supabase = getSupabase(c);
-  const { data, error } = await supabase.from("restaurants").select("id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at");
+  const { data, error } = await supabase.from("restaurants_with_likes").select("id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, like_count");
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
 });
 app.get("/api/dishes", async (c) => {
   const supabase = getSupabase(c);
-  const { data, error } = await supabase.from("dishes").select("id, name, restaurant_id, rating, price_level, actual_price, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url");
+  const { data, error } = await supabase.from("dishes_with_likes").select("id, name, restaurant_id, rating, price_level, actual_price, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, like_count");
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
 });
@@ -23760,6 +23760,52 @@ app.post("/api/flavor-tags", async (c) => {
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
 });
+app.get("/api/top-picks", async (c) => {
+  const supabase = getSupabase(c);
+  const { data: categories, error: catError } = await supabase.from("top_pick_categories").select("*").order("created_at", { ascending: true });
+  if (catError) return c.json({ error: catError.message }, 500);
+  const { data: restaurants, error: restError } = await supabase.from("top_pick_restaurants").select("*").order("position", { ascending: true });
+  if (restError) return c.json({ error: restError.message }, 500);
+  return c.json({ categories, restaurants });
+});
+app.post("/api/top-picks/categories", async (c) => {
+  const supabase = getSupabase(c);
+  const { name } = await c.req.json();
+  const { data, error } = await supabase.from("top_pick_categories").insert({ name }).select().single();
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
+});
+app.put("/api/top-picks/categories/:id", async (c) => {
+  const supabase = getSupabase(c);
+  const id = c.req.param("id");
+  const { name } = await c.req.json();
+  const { data, error } = await supabase.from("top_pick_categories").update({ name }).eq("id", id).select().single();
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
+});
+app.delete("/api/top-picks/categories/:id", async (c) => {
+  const supabase = getSupabase(c);
+  const id = c.req.param("id");
+  const { error } = await supabase.from("top_pick_categories").delete().eq("id", id);
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json({ success: true });
+});
+app.post("/api/top-picks/categories/:id/restaurants", async (c) => {
+  const supabase = getSupabase(c);
+  const id = c.req.param("id");
+  const { restaurantIds } = await c.req.json();
+  await supabase.from("top_pick_restaurants").delete().eq("category_id", id);
+  if (restaurantIds && restaurantIds.length > 0) {
+    const inserts = restaurantIds.map((restId, idx) => ({
+      category_id: id,
+      restaurant_id: restId,
+      position: idx
+    }));
+    const { error } = await supabase.from("top_pick_restaurants").insert(inserts);
+    if (error) return c.json({ error: error.message }, 500);
+  }
+  return c.json({ success: true });
+});
 app.get("/api/restaurant-photos/:id", async (c) => {
   return c.json({ restaurant: null, dishes: [] });
 });
@@ -23843,6 +23889,86 @@ app.post("/api/import-table", async (c) => {
   }
   return c.json({ success: true, imported: rows.length });
 });
+app.post("/api/users", async (c) => {
+  const supabase = getSupabase(c);
+  const { deviceId, firstName, lastName } = await c.req.json();
+  if (!deviceId || !firstName) return c.json({ error: "Missing required fields" }, 400);
+  const { data, error } = await supabase.from("users").upsert({ device_id: deviceId, first_name: firstName, last_name: lastName }, { onConflict: "device_id" }).select().single();
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
+});
+app.get("/api/users/:device_id/likes", async (c) => {
+  const supabase = getSupabase(c);
+  const deviceId = c.req.param("device_id");
+  const { data: user, error: userError } = await supabase.from("users").select("id").eq("device_id", deviceId).single();
+  if (userError || !user) return c.json({ error: userError?.message || "User not found" }, 404);
+  const { data: restLikes, error: restError } = await supabase.from("restaurant_likes").select("restaurant_id, is_like").eq("user_id", user.id);
+  if (restError) return c.json({ error: restError.message }, 500);
+  const { data: dishLikes, error: dishError } = await supabase.from("dish_likes").select("dish_id, is_like").eq("user_id", user.id);
+  if (dishError) return c.json({ error: dishError.message }, 500);
+  return c.json({
+    restaurants: restLikes,
+    dishes: dishLikes
+  });
+});
+app.post("/api/restaurants/:id/like", async (c) => {
+  const supabase = getSupabase(c);
+  const restaurantId = c.req.param("id");
+  const { deviceId, isLike } = await c.req.json();
+  if (!deviceId || typeof isLike !== "boolean" && isLike !== null) return c.json({ error: "Missing fields" }, 400);
+  const { data: user, error: userError } = await supabase.from("users").select("id").eq("device_id", deviceId).single();
+  if (userError || !user) return c.json({ error: "User not found" }, 404);
+  if (isLike === null) {
+    const { error: error2 } = await supabase.from("restaurant_likes").delete().match({ user_id: user.id, restaurant_id: restaurantId });
+    if (error2) return c.json({ error: error2.message }, 500);
+    return c.json({ success: true, removed: true });
+  }
+  const { data, error } = await supabase.from("restaurant_likes").upsert(
+    { user_id: user.id, restaurant_id: restaurantId, is_like: isLike },
+    { onConflict: "user_id, restaurant_id" }
+  ).select().single();
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
+});
+app.post("/api/dishes/:id/like", async (c) => {
+  const supabase = getSupabase(c);
+  const dishId = c.req.param("id");
+  const { deviceId, isLike } = await c.req.json();
+  if (!deviceId || typeof isLike !== "boolean" && isLike !== null) return c.json({ error: "Missing fields" }, 400);
+  const { data: user, error: userError } = await supabase.from("users").select("id").eq("device_id", deviceId).single();
+  if (userError || !user) return c.json({ error: "User not found" }, 404);
+  if (isLike === null) {
+    const { error: error2 } = await supabase.from("dish_likes").delete().match({ user_id: user.id, dish_id: dishId });
+    if (error2) return c.json({ error: error2.message }, 500);
+    return c.json({ success: true, removed: true });
+  }
+  const { data, error } = await supabase.from("dish_likes").upsert(
+    { user_id: user.id, dish_id: dishId, is_like: isLike },
+    { onConflict: "user_id, dish_id" }
+  ).select().single();
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
+});
+app.get("/api/restaurants/:id/likes", async (c) => {
+  const supabase = getSupabase(c);
+  const restaurantId = c.req.param("id");
+  const { data, error } = await supabase.from("restaurant_likes").select("users(first_name, last_name)").eq("restaurant_id", restaurantId).eq("is_like", true);
+  if (error) return c.json({ error: error.message }, 500);
+  const names = (data || []).map(
+    (row) => `${row.users?.first_name || ""} ${row.users?.last_name || ""}`.trim()
+  ).filter(Boolean);
+  return c.json({ names });
+});
+app.get("/api/dishes/:id/likes", async (c) => {
+  const supabase = getSupabase(c);
+  const dishId = c.req.param("id");
+  const { data, error } = await supabase.from("dish_likes").select("users(first_name, last_name)").eq("dish_id", dishId).eq("is_like", true);
+  if (error) return c.json({ error: error.message }, 500);
+  const names = (data || []).map(
+    (row) => `${row.users?.first_name || ""} ${row.users?.last_name || ""}`.trim()
+  ).filter(Boolean);
+  return c.json({ names });
+});
 var src_default = app;
 
 // node_modules/wrangler/templates/middleware/middleware-ensure-req-body-drained.ts
@@ -23886,7 +24012,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-PSuRVg/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-9CEkwX/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -23918,7 +24044,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-PSuRVg/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-9CEkwX/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

@@ -91,4 +91,58 @@ export const api = {
     sendJSON<{ success: boolean; deleted: number }>("POST", "/api/clear-table", { tableName, idColumn }),
   importTable: (tableName: string, rows: any[], upsertKey: string) =>
     sendJSON<{ success: boolean; imported: number }>("POST", "/api/import-table", { tableName, rows, upsertKey }),
+
+  // User and Likes
+  registerUser: (deviceId: string, firstName: string, lastName: string) =>
+    sendJSON<any>("POST", "/api/users", { deviceId, firstName, lastName }),
+  getUserLikes: (deviceId: string) =>
+    getJSON<{ restaurants: { restaurant_id: string, is_like: boolean }[], dishes: { dish_id: string, is_like: boolean }[] }>(`/api/users/${deviceId}/likes`),
+  setRestaurantLike: (restaurantId: string, deviceId: string, isLike: boolean | null) =>
+    sendJSON<any>("POST", `/api/restaurants/${restaurantId}/like`, { deviceId, isLike }),
+  setDishLike: (dishId: string, deviceId: string, isLike: boolean | null) =>
+    sendJSON<any>("POST", `/api/dishes/${dishId}/like`, { deviceId, isLike }),
+  getRestaurantLikes: (restaurantId: string) =>
+    getJSON<{ names: string[] }>(`/api/restaurants/${restaurantId}/likes`),
+  getDishLikes: (dishId: string) =>
+    getJSON<{ names: string[] }>(`/api/dishes/${dishId}/likes`),
+
+  async getTopPicks() {
+    return getJSON<{ categories: any[], restaurants: any[] }>(`/api/top-picks`);
+  },
+
+  async createTopPickCategory(name: string) {
+    const res = await fetch(`${apiBase}/api/top-picks/categories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    if (!res.ok) throw new Error('Failed to create top pick category');
+    return res.json();
+  },
+
+  async updateTopPickCategory(id: string, name: string) {
+    const res = await fetch(`${apiBase}/api/top-picks/categories/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    if (!res.ok) throw new Error('Failed to update top pick category');
+    return res.json();
+  },
+
+  async deleteTopPickCategory(id: string) {
+    const res = await fetch(`${apiBase}/api/top-picks/categories/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete top pick category');
+    return res.json();
+  },
+
+  async updateTopPickRestaurants(categoryId: string, restaurantIds: string[]) {
+    const res = await fetch(`${apiBase}/api/top-picks/categories/${categoryId}/restaurants`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ restaurantIds })
+    });
+    if (!res.ok) throw new Error('Failed to update top pick restaurants');
+    return res.json();
+  }
 };

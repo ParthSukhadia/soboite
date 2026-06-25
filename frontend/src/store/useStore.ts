@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { Restaurant, Dish, DishReview, PhotoEntry } from '../types';
+import { Restaurant, Dish, DishReview, PhotoEntry, TopPickCategory, TopPickRestaurant } from '../types';
 import { api } from '../api';
 import { prefetchCachedImages } from '../lib/imageCache';
 import { indexedDBStorage } from './indexedDBStorage';
@@ -201,7 +201,8 @@ const normalizeDbRestaurant = (r: any): Restaurant => {
     costForTwo: r.cost_for_two ?? r.costForTwo,
     ambienceRating: r.ambience_rating ?? r.ambienceRating,
     serviceRating: r.service_rating ?? r.serviceRating,
-    createdAt: r.created_at || r.createdAt
+    createdAt: r.created_at || r.createdAt,
+    likeCount: typeof r.like_count === 'number' ? r.like_count : (Number(r.like_count) || 0)
   };
 };
 
@@ -225,7 +226,8 @@ const normalizeDbDish = (d: any): Dish => {
     imageStorageUrl: resolvePrimaryPhotoUrl(photos, primaryPhotoId, d.image_storage_url ?? d.image_storage_url),
     isRecommended: Boolean(d.is_recommended ?? d.isRecommended),
     cuisine: d.cuisine,
-    flavorTags: d.flavor_tags ?? d.flavorTags
+    flavorTags: d.flavor_tags ?? d.flavorTags,
+    likeCount: typeof d.like_count === 'number' ? d.like_count : (Number(d.like_count) || 0)
   };
 };
 
@@ -247,6 +249,8 @@ interface AppState {
   restaurantTypes: string[];
   cuisines: string[];
   flavorTags: string[];
+  topPickCategories: TopPickCategory[];
+  topPickRestaurants: TopPickRestaurant[];
   loading: boolean;
   networkBusy: boolean;
   setNetworkBusy: (busy: boolean) => void;
@@ -266,6 +270,12 @@ interface AppState {
   ensureRestaurantType: (value: string) => Promise<void>;
   ensureCuisine: (value: string) => Promise<void>;
   ensureFlavorTag: (value: string) => Promise<void>;
+  setFlavorTags: (tags: string[]) => Promise<void>;
+
+  createTopPickCategory: (name: string) => Promise<void>;
+  updateTopPickCategory: (id: string, name: string) => Promise<void>;
+  deleteTopPickCategory: (id: string) => Promise<void>;
+  updateTopPickRestaurants: (categoryId: string, restaurantIds: string[]) => Promise<void>;
 
   addRestaurantToState: (restaurant: any) => void;
   updateRestaurantInState: (id: string, updates: any) => void;
@@ -274,6 +284,18 @@ interface AppState {
   addDishToState: (dish: any) => void;
   updateDishInState: (id: string, updates: any) => void;
   deleteDishFromState: (id: string) => void;
+
+  deviceId: string | null;
+  userFirstName: string | null;
+  userLastName: string | null;
+  restaurantLikes: Record<string, boolean | null>;
+  dishLikes: Record<string, boolean | null>;
+
+  initDeviceUser: () => void;
+  registerDeviceUser: (firstName: string, lastName: string) => Promise<void>;
+  fetchUserLikes: () => Promise<void>;
+  toggleRestaurantLike: (restaurantId: string, isLike: boolean | null) => Promise<void>;
+  toggleDishLike: (dishId: string, isLike: boolean | null) => Promise<void>;
 }
 
 let activeFetchId = 0;
@@ -298,10 +320,18 @@ export const useStore = create<AppState>()(
       restaurantTypes: [],
       cuisines: [],
       flavorTags: [],
+      topPickCategories: [],
+      topPickRestaurants: [],
       loading: false,
       networkBusy: false,
       setNetworkBusy: (busy) => set({ networkBusy: busy }),
       lastFetch: null,
+
+      deviceId: null,
+      userFirstName: null,
+      userLastName: null,
+      restaurantLikes: {},
+      dishLikes: {},
 
       ensureRestaurantType: async (value: string) => {
         const normalized = value.trim();
@@ -343,6 +373,38 @@ export const useStore = create<AppState>()(
         });
       },
 
+      setFlavorTags: async (tags: string[]) => {
+        set({ flavorTags: tags });
+      },
+
+      createTopPickCategory: async (name: string) => {
+        const cat = await api.createTopPickCategory(name);
+        set((state) => ({
+          topPickCategories: [...state.topPickCategories, cat]
+        }));
+      },
+
+      updateTopPickCategory: async (id: string, name: string) => {
+        const cat = await api.updateTopPickCategory(id, name);
+        set((state) => ({
+          topPickCategories: state.topPickCategories.map(c => c.id === id ? cat : c)
+        }));
+      },
+
+      deleteTopPickCategory: async (id: string) => {
+        await api.deleteTopPickCategory(id);
+        set((state) => ({
+          topPickCategories: state.topPickCategories.filter(c => c.id !== id),
+          topPickRestaurants: state.topPickRestaurants.filter(r => r.category_id !== id)
+        }));
+      },
+
+      updateTopPickRestaurants: async (categoryId: string, restaurantIds: string[]) => {
+        await api.updateTopPickRestaurants(categoryId, restaurantIds);
+        // Refresh everything to get new Top Picks
+        get().fetchData(true, true);
+      },
+
       fetchData: async (force = false, background = false) => {
         const state = get();
         // Deduplicate concurrent non-forced fetches
@@ -360,12 +422,13 @@ export const useStore = create<AppState>()(
           const fetchId = ++activeFetchId;
           console.log("Starting data fetch from Supabase... (Fetch ID:", fetchId, ")");
           try {
-            const [restaurants, dishes, types, cuisines, flavorTags] = await Promise.all([
+            const [restaurants, dishes, types, cuisines, flavorTags, topPicksRes] = await Promise.all([
               api.getRestaurants(),
               api.getDishes(),
               Promise.resolve([]),
               Promise.resolve([]),
               Promise.resolve([]),
+              api.getTopPicks().catch(e => { console.error('Top picks fetch error:', e); return { categories: [], restaurants: [] }; })
             ]);
             let restRes = { data: restaurants, error: null } as any;
             let dishRes = { data: dishes, error: null } as any;
@@ -428,14 +491,22 @@ export const useStore = create<AppState>()(
 
             const uniqueSorted = (values: string[]) => Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
 
-            set({
+            const newState: Partial<AppState> = {
               restaurants: mappedRests,
               dishes: mappedDishes,
               restaurantTypes: uniqueSorted(tableTypes.length > 0 ? tableTypes : derivedTypes),
               cuisines: uniqueSorted(tableCuisines.length > 0 ? tableCuisines : derivedCuisines),
               flavorTags: uniqueSorted(tableFlavorTags.length > 0 ? tableFlavorTags : derivedFlavorTags),
+              loading: false,
               lastFetch: Date.now()
-            });
+            };
+
+            if (topPicksRes && Array.isArray(topPicksRes.categories) && Array.isArray(topPicksRes.restaurants)) {
+              newState.topPickCategories = topPicksRes.categories;
+              newState.topPickRestaurants = topPicksRes.restaurants;
+            }
+
+            set(newState);
 
             void cacheImageUrlsForState(mappedRests, mappedDishes);
           } catch (error) {
@@ -939,6 +1010,95 @@ export const useStore = create<AppState>()(
           dishes: state.dishes.filter((d) => d.id !== id)
         }));
       },
+
+      initDeviceUser: () => {
+        const state = get();
+        if (!state.deviceId) {
+          const newDeviceId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' 
+            ? crypto.randomUUID() 
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          set({ deviceId: newDeviceId });
+        }
+      },
+
+      registerDeviceUser: async (firstName: string, lastName: string) => {
+        const state = get();
+        if (!state.deviceId) {
+          state.initDeviceUser();
+        }
+        const devId = get().deviceId!;
+        try {
+          await api.registerUser(devId, firstName, lastName);
+          set({ userFirstName: firstName, userLastName: lastName });
+          await get().fetchUserLikes();
+        } catch (error) {
+          console.error("Failed to register user:", error);
+        }
+      },
+
+      fetchUserLikes: async () => {
+        const state = get();
+        if (!state.deviceId) return;
+        try {
+          const likes = await api.getUserLikes(state.deviceId);
+          const restLikes: Record<string, boolean> = {};
+          likes.restaurants.forEach(l => { restLikes[l.restaurant_id] = l.is_like; });
+          const dishLikes: Record<string, boolean> = {};
+          likes.dishes.forEach(l => { dishLikes[l.dish_id] = l.is_like; });
+          set({ restaurantLikes: restLikes, dishLikes: dishLikes });
+        } catch (error) {
+          console.error("Failed to fetch user likes:", error);
+        }
+      },
+
+      toggleRestaurantLike: async (restaurantId: string, isLike: boolean | null) => {
+        const state = get();
+        if (!state.deviceId) return;
+        // Optimistic UI update
+        set((s) => {
+          const prevState = s.restaurantLikes[restaurantId];
+          let delta = 0;
+          if (isLike === true && prevState !== true) delta = 1;
+          else if (isLike !== true && prevState === true) delta = -1;
+
+          return {
+            restaurantLikes: { ...s.restaurantLikes, [restaurantId]: isLike },
+            restaurants: delta !== 0 
+              ? s.restaurants.map(r => r.id === restaurantId ? { ...r, likeCount: (r.likeCount || 0) + delta } : r) 
+              : s.restaurants
+          };
+        });
+        try {
+          await api.setRestaurantLike(restaurantId, state.deviceId, isLike);
+        } catch (error) {
+          console.error("Failed to set restaurant like:", error);
+          // Rollback if failed (optional, simpler to just log for now)
+        }
+      },
+
+      toggleDishLike: async (dishId: string, isLike: boolean | null) => {
+        const state = get();
+        if (!state.deviceId) return;
+        // Optimistic UI update
+        set((s) => {
+          const prevState = s.dishLikes[dishId];
+          let delta = 0;
+          if (isLike === true && prevState !== true) delta = 1;
+          else if (isLike !== true && prevState === true) delta = -1;
+
+          return {
+            dishLikes: { ...s.dishLikes, [dishId]: isLike },
+            dishes: delta !== 0 
+              ? s.dishes.map(d => d.id === dishId ? { ...d, likeCount: (d.likeCount || 0) + delta } : d) 
+              : s.dishes
+          };
+        });
+        try {
+          await api.setDishLike(dishId, state.deviceId, isLike);
+        } catch (error) {
+          console.error("Failed to set dish like:", error);
+        }
+      },
     }),
     {
       name: 'soboite-storage-v3',
@@ -951,11 +1111,18 @@ export const useStore = create<AppState>()(
         cuisines: state.cuisines,
         flavorTags: state.flavorTags,
         lastFetch: state.lastFetch,
+        deviceId: state.deviceId,
+        userFirstName: state.userFirstName,
+        userLastName: state.userLastName,
+        restaurantLikes: state.restaurantLikes,
+        dishLikes: state.dishLikes,
       }),
       // Called when IndexedDB async rehydration finishes — signals UI to stop blocking
       onRehydrateStorage: () => (state) => {
         if (state) {
           state.setHydrated();
+          state.initDeviceUser();
+          void state.fetchUserLikes();
         }
       },
     }

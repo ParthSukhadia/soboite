@@ -60,3 +60,60 @@ CREATE TABLE dishes (
     cuisine TEXT,
     flavor_tags TEXT[]
 );
+
+-- Create Users Table
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    device_id TEXT UNIQUE NOT NULL,
+    first_name TEXT NOT NULL,
+    last_name TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Create Restaurant Likes Table
+CREATE TABLE IF NOT EXISTS restaurant_likes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    restaurant_id UUID REFERENCES restaurants(id) ON DELETE CASCADE,
+    is_like BOOLEAN NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(user_id, restaurant_id)
+);
+
+-- Create Dish Likes Table
+CREATE TABLE IF NOT EXISTS dish_likes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    dish_id UUID REFERENCES dishes(id) ON DELETE CASCADE,
+    is_like BOOLEAN NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(user_id, dish_id)
+);
+
+-- Create views for fetching aggregated likes
+CREATE OR REPLACE VIEW restaurants_with_likes AS
+SELECT r.*,
+       (SELECT COUNT(*) FROM restaurant_likes rl WHERE rl.restaurant_id = r.id AND rl.is_like = true) AS like_count
+FROM restaurants r;
+
+CREATE OR REPLACE VIEW dishes_with_likes AS
+SELECT d.*,
+       (SELECT COUNT(*) FROM dish_likes dl WHERE dl.dish_id = d.id AND dl.is_like = true) AS like_count
+FROM dishes d;
+
+-- Create Top Pick Categories
+CREATE TABLE IF NOT EXISTS top_pick_categories (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Create Top Pick Restaurants
+CREATE TABLE IF NOT EXISTS top_pick_restaurants (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    category_id UUID REFERENCES top_pick_categories(id) ON DELETE CASCADE,
+    restaurant_id UUID REFERENCES restaurants(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(category_id, restaurant_id)
+);

@@ -200,7 +200,7 @@ const truncateName = (name: string) => {
   return `${name.slice(0, 18)}...`;
 };
 
-const buildRestaurantIcon = (restaurant: Restaurant, rating?: number, isDim?: boolean, isSelected?: boolean) => {
+const buildRestaurantIcon = (restaurant: Restaurant, rating?: number, isDim?: boolean, isSelected?: boolean, isLiked?: boolean) => {
   const ratingText = rating === undefined ? '--' : rating.toFixed(1);
   const color = getRatingColor(rating);
   const label = truncateName(restaurant.name);
@@ -210,9 +210,11 @@ const buildRestaurantIcon = (restaurant: Restaurant, rating?: number, isDim?: bo
     isSelected ? 'restaurant-marker--selected' : ''
   ].filter(Boolean).join(' ');
 
+  const heartHtml = isLiked ? `<div class="restaurant-marker__heart" style="position: absolute; top: -6px; right: -6px; background: white; border-radius: 50%; padding: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); z-index: 10;"><svg width="12" height="12" viewBox="0 0 24 24" fill="#ef4444" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg></div>` : '';
+
   return L.divIcon({
     className,
-    html: `<div class="restaurant-marker__pin" style="--pin-color:${color}"><span class="restaurant-marker__rating">${ratingText}</span></div><div class="restaurant-marker__label">${label}</div>`,
+    html: `<div class="restaurant-marker__pin" style="--pin-color:${color}"><span class="restaurant-marker__rating">${ratingText}</span>${heartHtml}</div><div class="restaurant-marker__label">${label}</div>`,
     iconSize: [140, 44],
     iconAnchor: [16, 34]
   });
@@ -223,15 +225,17 @@ const RestaurantMarker = React.memo(({
   rating, 
   isDim, 
   isSelected, 
+  isLiked,
   onClick 
 }: { 
   restaurant: Restaurant; 
   rating?: number; 
   isDim: boolean; 
   isSelected: boolean; 
+  isLiked?: boolean;
   onClick: (id: string) => void; 
 }) => {
-  const icon = useMemo(() => buildRestaurantIcon(restaurant, rating, isDim, isSelected), [restaurant, rating, isDim, isSelected]);
+  const icon = useMemo(() => buildRestaurantIcon(restaurant, rating, isDim, isSelected, isLiked), [restaurant, rating, isDim, isSelected, isLiked]);
   
   return (
     <Marker 
@@ -257,7 +261,9 @@ export default function MapPage() {
     ensureRestaurantType,
     ensureCuisine,
     ensureFlavorTag,
-    setNetworkBusy
+    setNetworkBusy,
+    restaurantLikes,
+    dishLikes
   } = useStore();
   const [showAddForm, setShowAddForm] = useState(false);
   const [latLng, setLatLng] = useState<PinLatLng | null>(null);
@@ -1769,16 +1775,20 @@ export default function MapPage() {
         }} />
         <SelectedRestaurantFlyTo restaurant={activeRest} />
         <MapClickHandler onClick={handleMapClick} />
-        {restaurants.filter(hasValidRestaurantCoordinates).map(rest => (
-          <RestaurantMarker 
-            key={rest.id} 
-            restaurant={rest}
-            rating={ratingsByRestaurant.get(rest.id)}
-            isDim={!matchesFilters(rest)}
-            isSelected={rest.id === selectedRest}
-            onClick={handleMarkerSelect}
-          />
-        ))}
+        {restaurants.filter(hasValidRestaurantCoordinates).map(rest => {
+          const isLiked = restaurantLikes[rest.id] === true || dishes.some(d => d.restaurantId === rest.id && dishLikes[d.id] === true);
+          return (
+            <RestaurantMarker 
+              key={rest.id} 
+              restaurant={rest}
+              rating={ratingsByRestaurant.get(rest.id)}
+              isDim={!matchesFilters(rest)}
+              isSelected={rest.id === selectedRest}
+              isLiked={isLiked}
+              onClick={handleMarkerSelect}
+            />
+          );
+        })}
         {validPinLatLng && showAddForm && editMode && (
           <Marker position={[validPinLatLng.lat, validPinLatLng.lng]} opacity={0.5} />
         )}
@@ -1930,7 +1940,7 @@ export default function MapPage() {
                 <input
                   ref={restaurantPhotoInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*"
                   onChange={(e) => handleRestaurantPhotoUpload(e.target.files?.[0] ?? null)}
                   className="hidden"
                 />
@@ -2217,7 +2227,7 @@ export default function MapPage() {
                         <input
                           ref={dishPhotoInputRef}
                           type="file"
-                          accept="image/*"
+                          accept="image/*,video/*"
                           multiple
                           onChange={(e) => handleDishPhotoUpload(e.target.files)}
                           className="hidden"

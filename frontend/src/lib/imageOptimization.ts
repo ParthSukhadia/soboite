@@ -2,6 +2,9 @@ export const optimizeImage = (file: File, maxWidth = 1024, maxHeight = 1024, qua
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
+      if (file.type.startsWith('video/')) {
+        return resolve(e.target?.result as string);
+      }
       const img = new Image();
       img.onload = () => {
         let width = img.width;

@@ -85,7 +85,10 @@ export default function MainLayout() {
     setEditMode,
     networkBusy,
     isDarkMode,
-    setDarkMode
+    setDarkMode,
+    userFirstName,
+    hydrated,
+    registerDeviceUser
   } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
@@ -98,6 +101,12 @@ export default function MainLayout() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Registration state
+  const [regFirstName, setRegFirstName] = useState('');
+  const [regLastName, setRegLastName] = useState('');
+  const [regLoading, setRegLoading] = useState(false);
+
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const location = useLocation();
   const currentPath = location.pathname;
@@ -267,6 +276,14 @@ export default function MainLayout() {
     }
   };
 
+  const handleRegistrationSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!regFirstName.trim()) return;
+    setRegLoading(true);
+    await registerDeviceUser(regFirstName.trim(), regLastName.trim());
+    setRegLoading(false);
+  };
+
   return (
     <div className="flex flex-col h-dvh overflow-hidden">
       <header className="bg-white border-b border-gray-200 shadow-sm z-[3000] px-4 py-3 flex justify-between items-center relative">
@@ -300,6 +317,11 @@ export default function MainLayout() {
         </div>
 
         <div className="flex items-center gap-3">
+          {userFirstName && (
+            <span className="hidden sm:inline font-black text-xl text-transparent bg-clip-text bg-gradient-to-r from-amber-500 to-rose-500 mr-2 tracking-tight">
+              👋 HELLO HELLO HELLO, {userFirstName.toUpperCase()}!
+            </span>
+          )}
           <button
             type="button"
             disabled={isRefreshing || networkBusy || isProcessing}
@@ -418,7 +440,11 @@ export default function MainLayout() {
           <aside className="ml-auto w-full max-w-xs bg-white shadow-2xl border-l border-gray-200 p-5 overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <p className="text-sm uppercase tracking-[0.2em] text-gray-500">Menu</p>
+                {userFirstName && (
+                  <p className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-500 to-rose-500 mt-1 tracking-tight">
+                    👋 HELLO HELLO HELLO, {userFirstName.toUpperCase()}!
+                  </p>
+                )}
               </div>
               <button
                 type="button"
@@ -574,10 +600,13 @@ export default function MainLayout() {
         <div className="fixed inset-0 z-[4000] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="px-6 auto py-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                <Lock size={20} className="text-red-500" />
-                Login
-              </h2>
+              <div className="flex flex-col">
+                <h2 className="text-xl font-bold flex items-center gap-2">
+                  <Lock size={20} className="text-red-500" />
+                  Admin Login
+                </h2>
+                <p className="text-xs text-gray-500 mt-1 ml-7">Only for administrators</p>
+              </div>
               <button
                 type="button"
                 onClick={() => {
@@ -621,6 +650,48 @@ export default function MainLayout() {
                 className="w-full bg-black text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition active:scale-95 flex items-center justify-center gap-2"
               >
                 Login to edit
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {hydrated && !userFirstName && (
+        <div className="fixed inset-0 z-[5000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-6 py-5 border-b border-gray-100">
+              <h2 className="text-xl font-bold">Welcome!</h2>
+              <p className="text-sm text-gray-500 mt-1">We need just your name to get started.</p>
+            </div>
+            <form onSubmit={handleRegistrationSubmit} className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">First Name</label>
+                <input
+                  type="text"
+                  autoFocus
+                  required
+                  value={regFirstName}
+                  onChange={(e) => setRegFirstName(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-black transition shadow-inner"
+                  placeholder="e.g. John"
+                />
+              </div>
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Last Name (Optional)</label>
+                <input
+                  type="text"
+                  value={regLastName}
+                  onChange={(e) => setRegLastName(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-black transition shadow-inner"
+                  placeholder="e.g. Doe"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={!regFirstName.trim() || regLoading}
+                className="w-full bg-black text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-70"
+              >
+                {regLoading ? <Loader2 size={18} className="animate-spin" /> : 'Continue'}
               </button>
             </form>
           </div>
