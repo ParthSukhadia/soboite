@@ -378,31 +378,78 @@ export const useStore = create<AppState>()(
       },
 
       createTopPickCategory: async (name: string) => {
-        const cat = await api.createTopPickCategory(name);
-        set((state) => ({
-          topPickCategories: [...state.topPickCategories, cat]
-        }));
+        const tempId = `temp-${Date.now()}`;
+        const tempCat = { id: tempId, name, position: 999 };
+        set((state) => ({ topPickCategories: [...state.topPickCategories, tempCat] }));
+        try {
+          const cat = await api.createTopPickCategory(name);
+          set((state) => ({
+            topPickCategories: state.topPickCategories.map(c => c.id === tempId ? cat : c)
+          }));
+        } catch (error) {
+          set((state) => ({
+            topPickCategories: state.topPickCategories.filter(c => c.id !== tempId)
+          }));
+          throw error;
+        }
       },
 
       updateTopPickCategory: async (id: string, name: string) => {
-        const cat = await api.updateTopPickCategory(id, name);
+        const previousCat = get().topPickCategories.find(c => c.id === id);
+        if (!previousCat) return;
         set((state) => ({
-          topPickCategories: state.topPickCategories.map(c => c.id === id ? cat : c)
+          topPickCategories: state.topPickCategories.map(c => c.id === id ? { ...c, name } : c)
         }));
+        try {
+          const cat = await api.updateTopPickCategory(id, name);
+          set((state) => ({
+            topPickCategories: state.topPickCategories.map(c => c.id === id ? cat : c)
+          }));
+        } catch (error) {
+          set((state) => ({
+            topPickCategories: state.topPickCategories.map(c => c.id === id ? previousCat : c)
+          }));
+          throw error;
+        }
       },
 
       deleteTopPickCategory: async (id: string) => {
-        await api.deleteTopPickCategory(id);
+        const previousCats = get().topPickCategories;
+        const previousRests = get().topPickRestaurants;
         set((state) => ({
           topPickCategories: state.topPickCategories.filter(c => c.id !== id),
           topPickRestaurants: state.topPickRestaurants.filter(r => r.category_id !== id)
         }));
+        try {
+          await api.deleteTopPickCategory(id);
+        } catch (error) {
+          set({
+            topPickCategories: previousCats,
+            topPickRestaurants: previousRests
+          });
+          throw error;
+        }
       },
 
       updateTopPickRestaurants: async (categoryId: string, restaurantIds: string[]) => {
-        await api.updateTopPickRestaurants(categoryId, restaurantIds);
-        // Refresh everything to get new Top Picks
-        get().fetchData(true, true);
+        const previousRests = get().topPickRestaurants;
+        
+        const currentTpr = get().topPickRestaurants.filter(r => r.category_id !== categoryId);
+        const newTpr = restaurantIds.map((id, index) => ({
+          id: `temp-${categoryId}-${id}`,
+          category_id: categoryId,
+          restaurant_id: id,
+          position: index + 1
+        }));
+        set({ topPickRestaurants: [...currentTpr, ...newTpr] });
+
+        try {
+          await api.updateTopPickRestaurants(categoryId, restaurantIds);
+          get().fetchData(true, true);
+        } catch (error) {
+          set({ topPickRestaurants: previousRests });
+          throw error;
+        }
       },
 
       fetchData: async (force = false, background = false) => {

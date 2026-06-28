@@ -58,16 +58,11 @@ function LocationMarker({ onLocation }: { onLocation?: (pos: L.LatLng) => void }
       return;
     }
 
-    let hasCentered = false;
     const handleSuccess = (geo: GeolocationPosition) => {
       const next = safeLatLng({ lat: geo.coords.latitude, lng: geo.coords.longitude });
       if (!next) return;
       setPosition(next);
       onLocation?.(next);
-      if (!hasCentered) {
-        map.setView(next, 14, { animate: false });
-        hasCentered = true;
-      }
     };
 
     const handleError = (error: GeolocationPositionError) => {
@@ -80,13 +75,15 @@ function LocationMarker({ onLocation }: { onLocation?: (pos: L.LatLng) => void }
       maximumAge: 0
     });
 
-    const watchId = navigator.geolocation.watchPosition(handleSuccess, handleError, {
-      enableHighAccuracy: true,
-      timeout: 20000,
-      maximumAge: 0
-    });
+    const intervalId = window.setInterval(() => {
+      navigator.geolocation.getCurrentPosition(handleSuccess, handleError, {
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0
+      });
+    }, 60000);
 
-    return () => navigator.geolocation.clearWatch(watchId);
+    return () => window.clearInterval(intervalId);
   }, [map, onLocation]);
 
   useEffect(() => {
@@ -1225,9 +1222,8 @@ export default function MapPage() {
         rest,
         distance: getDistanceInMeters(rest.lat, rest.lng, selected.lat, selected.lng),
       }))
-      .filter((item) => item.distance <= 800)
+      .filter((item) => item.distance <= 500)
       .sort((a, b) => a.distance - b.distance)
-      .slice(0, 10)
       .map((item) => item.rest);
 
     const selectedCard = sortedByDistance.find((rest) => rest.id === selected.id);

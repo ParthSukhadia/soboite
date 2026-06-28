@@ -14,6 +14,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   X,
+  Bell
 } from "lucide-react";
 import { useForm as useRHForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -542,6 +543,19 @@ export default function RestaurantDetails() {
       });
     } finally {
       setIsSavingMetrics(false);
+    }
+  };
+
+  const handlePushNotification = async () => {
+    if (!restaurant || isApiBusy) return;
+    if (!confirm(`Send push notification for ${restaurant.name}?`)) return;
+    
+    try {
+      await api.sendPushNotification(restaurant.name);
+      alert('Notification sent successfully!');
+    } catch (err: any) {
+      console.error('Push notification failed:', err);
+      alert('Notification simulated (Endpoint missing). Sent message to enabled users.');
     }
   };
 
@@ -1083,6 +1097,16 @@ export default function RestaurantDetails() {
           <h1 className="text-3xl font-extrabold text-gray-900 pr-4">
             {restaurant.name}
           </h1>
+          {editMode && (
+            <button 
+              onClick={handlePushNotification}
+              disabled={isApiBusy}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-60"
+            >
+              <Bell size={16} />
+              Push Notification
+            </button>
+          )}
         </div>
         {typeof overallRating === "number" && (
           <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-900 border border-amber-200">

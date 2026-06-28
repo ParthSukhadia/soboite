@@ -144,5 +144,8 @@ export const api = {
     });
     if (!res.ok) throw new Error('Failed to update top pick restaurants');
     return res.json();
-  }
+  },
+
+  sendPushNotification: (restaurantName: string) =>
+    sendJSON<void>("POST", "/api/push-notification", { message: `New restaurant added: ${restaurantName}! Check it out now.` })
 };

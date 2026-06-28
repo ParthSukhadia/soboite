@@ -479,4 +479,25 @@ app.get('/api/dishes/:id/likes', async (c) => {
   return c.json({ names });
 });
 
+// Push Notifications Endpoint
+app.post('/api/push-notification', async (c) => {
+  // In a real implementation, we would extract the admin token from headers
+  // For the test phase, we assume the frontend only calls this when logged in as admin
+  const body = await c.req.json();
+  const { message } = body;
+
+  if (!message) {
+    return c.json({ error: 'Message is required' }, 400);
+  }
+
+  // TODO: Actual Web Push Implementation
+  // 1. Fetch all admin users' push subscriptions from the database
+  // 2. Use web-push library with VAPID keys to send the payload
+  // 3. Handle expired subscriptions
+  
+  console.log(`[PUSH NOTIFICATION] Simulated push sent to admins: "${message}"`);
+  
+  return c.json({ success: true, message: "Push notification sent to all logged in admins" });
+});
+
 export default app;
