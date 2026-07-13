@@ -58,7 +58,8 @@ CREATE TABLE dishes (
     primary_photo_id TEXT,
     is_recommended BOOLEAN DEFAULT FALSE,
     cuisine TEXT,
-    flavor_tags TEXT[]
+    flavor_tags TEXT[],
+    serves TEXT
 );
 
 -- Create Users Table

@@ -13,7 +13,10 @@
     "wrangler": "^4.98.0"
   },
   "dependencies": {
-    "hono": "^4.12.23",
-    "@supabase/supabase-js": "^2.100.1"
+    "@google/genai": "^2.10.0",
+    "@hey-api/client-fetch": "^0.13.1",
+    "@supabase/supabase-js": "^2.100.1",
+    "@zernio/node": "^0.2.308",
+    "hono": "^4.12.23"
   }
 }

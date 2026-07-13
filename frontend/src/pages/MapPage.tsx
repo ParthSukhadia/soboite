@@ -10,6 +10,7 @@ import { optimizeImage } from '../lib/imageOptimization';
 import TagSelector from '../components/TagSelector';
 import PriceLevelIcon from '../components/PriceLevelIcon';
 import CachedImage from '../components/CachedImage';
+import NearbyPOIs from '../components/NearbyPOIs';
 
 type PinLatLng = { lat: number; lng: number };
 
@@ -366,9 +367,30 @@ export default function MapPage() {
   const validPinLatLng = normalizePinLatLng(latLng);
   const validCurrentPosition = normalizePinLatLng(currentPosition);
 
+  const fetchAddressForPin = async (position: PinLatLng) => {
+    setAddFormError(null);
+    setIsGeocodingAddress(true);
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.lat}&lon=${position.lng}&zoom=18&addressdetails=1`);
+      if (!res.ok) throw new Error('Network request failed');
+      const data = await res.json();
+      if (data && data.display_name) {
+        setNewRestAddress(data.display_name);
+        sessionStorage.setItem('draft_restAddress', data.display_name);
+      } else {
+        setAddFormError('Could not get address for this pin.');
+      }
+    } catch (e) {
+      setAddFormError(e instanceof Error ? e.message : 'Error retrieving address from pin');
+    } finally {
+      setIsGeocodingAddress(false);
+    }
+  };
+
   const setLatLngSafely = (
     value: { lat: unknown; lng: unknown } | L.LatLng | null,
-    invalidMessage = 'Could not use that pin location. Please tap the map again.'
+    invalidMessage = 'Could not use that pin location. Please tap the map again.',
+    autoFetchAddress = false
   ) => {
     if (value === null) {
       setLatLng(null);
@@ -384,6 +406,9 @@ export default function MapPage() {
 
     setAddFormError(null);
     setLatLng(normalized);
+    if (autoFetchAddress) {
+      void fetchAddressForPin(normalized);
+    }
   };
 
   const temporarilyIgnoreCarouselSelection = () => {
@@ -2075,7 +2100,8 @@ export default function MapPage() {
                       attributionControl={false}
                     >
                       <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
-                      <MapClickHandler onClick={(event) => setLatLngSafely(event.latlng)} />
+                      <NearbyPOIs />
+                      <MapClickHandler onClick={(event) => setLatLngSafely(event.latlng, undefined, true)} />
                       <MapViewportUpdater center={validPinLatLng ? safeLatLng(validPinLatLng) : (validCurrentPosition ? safeLatLng(validCurrentPosition) : null)} />
                       <MapContainerResizeFixer trigger={`${addStep}-${validPinLatLng ? `${validPinLatLng.lat}-${validPinLatLng.lng}` : validCurrentPosition ? `${validCurrentPosition.lat}-${validCurrentPosition.lng}` : 'default'}`} />
                       {validPinLatLng && (
@@ -2086,7 +2112,7 @@ export default function MapPage() {
                             dragend: (event) => {
                               const marker = event.target;
                               const nextLatLng = marker.getLatLng();
-                              setLatLngSafely({ lat: nextLatLng.lat, lng: nextLatLng.lng });
+                              setLatLngSafely({ lat: nextLatLng.lat, lng: nextLatLng.lng }, undefined, true);
                             }
                           }}
                         />

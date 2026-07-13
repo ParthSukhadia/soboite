@@ -202,7 +202,10 @@ const normalizeDbRestaurant = (r: any): Restaurant => {
     ambienceRating: r.ambience_rating ?? r.ambienceRating,
     serviceRating: r.service_rating ?? r.serviceRating,
     createdAt: r.created_at || r.createdAt,
-    likeCount: typeof r.like_count === 'number' ? r.like_count : (Number(r.like_count) || 0)
+    likeCount: typeof r.like_count === 'number' ? r.like_count : (Number(r.like_count) || 0),
+    instaPublished: Boolean(r.insta_published ?? r.instaPublished),
+    instaPublishedAt: r.insta_published_at ?? r.instaPublishedAt,
+    instaEditedPhotoUrl: r.insta_edited_photo_url ?? r.instaEditedPhotoUrl
   };
 };
 
@@ -227,7 +230,10 @@ const normalizeDbDish = (d: any): Dish => {
     isRecommended: Boolean(d.is_recommended ?? d.isRecommended),
     cuisine: d.cuisine,
     flavorTags: d.flavor_tags ?? d.flavorTags,
-    likeCount: typeof d.like_count === 'number' ? d.like_count : (Number(d.like_count) || 0)
+    likeCount: typeof d.like_count === 'number' ? d.like_count : (Number(d.like_count) || 0),
+    instaPublished: Boolean(d.insta_published ?? d.instaPublished),
+    instaPublishedAt: d.insta_published_at ?? d.instaPublishedAt,
+    instaEditedPhotoUrl: d.insta_edited_photo_url ?? d.instaEditedPhotoUrl
   };
 };
 
@@ -467,7 +473,7 @@ export const useStore = create<AppState>()(
             set({ loading: true });
           }
           const fetchId = ++activeFetchId;
-          console.log("Starting data fetch from Supabase... (Fetch ID:", fetchId, ")");
+          
           try {
             const [restaurants, dishes, types, cuisines, flavorTags, topPicksRes] = await Promise.all([
               api.getRestaurants(),
@@ -484,7 +490,7 @@ export const useStore = create<AppState>()(
             let flavorTagRes = { data: flavorTags, error: null } as any;
 
             if (fetchId !== activeFetchId) {
-              console.log("Fetch ID mismatch. Aborting this fetch.", fetchId);
+              
               return;
             }
 
@@ -493,7 +499,7 @@ export const useStore = create<AppState>()(
               return;
             }
 
-            console.log("Supabase Restaurants Response:", { data: restRes.data });
+            
 
             let mappedRests: Restaurant[] = state.restaurants;
             let mappedDishes: Dish[] = state.dishes;
@@ -510,7 +516,7 @@ export const useStore = create<AppState>()(
               }
             }
 
-            console.log("Supabase Dishes Response:", { data: dishRes?.data, error: dishRes?.error });
+            
             if (!dishRes || dishRes.error) {
               console.error("Dish fetch error after retries:", dishRes?.error);
               return;

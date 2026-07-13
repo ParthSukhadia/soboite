@@ -125,3 +125,9 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_restaurants_location_name ON restaurants(location_name);
+
+ALTER TABLE dishes ADD COLUMN IF NOT EXISTS serves TEXT;
+
+DROP VIEW IF EXISTS dishes_with_likes CASCADE;
+CREATE OR REPLACE VIEW dishes_with_likes AS
+SELECT d.*, (SELECT COUNT(*) FROM dish_likes dl WHERE dl.dish_id = d.id AND dl.is_like = true) AS like_count FROM dishes d;

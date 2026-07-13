@@ -1,8 +1,12 @@
-import { useRef, useState, FormEvent, useEffect } from 'react';
+import { useRef, useState, FormEvent, useEffect, useMemo } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { DatabaseZap, Download, Settings2, Upload, LogIn, LogOut, Lock, X, Menu, Eye, EyeOff, Loader2, RotateCw } from 'lucide-react';
+import { DatabaseZap, Download, Settings2, Upload, LogIn, LogOut, Lock, X, Menu, Eye, EyeOff, Loader2, RotateCw, Share2, Bell } from 'lucide-react';
 import { api } from '../api';
 import { useStore } from '../store/useStore';
+import { processInstagramImage } from '../lib/instagramProcessing';
+import { useToast } from '../components/Toast';
+import { ConfirmModal } from '../components/ConfirmModal';
+import { AppEvent } from '../types';
 
 interface ExportPayload {
   version: number;
@@ -88,7 +92,11 @@ export default function MainLayout() {
     setDarkMode,
     userFirstName,
     hydrated,
-    registerDeviceUser
+    registerDeviceUser,
+    restaurants,
+    dishes,
+    updateRestaurant,
+    updateDish
   } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
@@ -107,6 +115,19 @@ export default function MainLayout() {
   const [regLastName, setRegLastName] = useState('');
   const [regLoading, setRegLoading] = useState(false);
 
+  const { addToast } = useToast();
+  const [events, setEvents] = useState<AppEvent[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; isDestructive: boolean; action: (() => Promise<void> | void) | null }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    isDestructive: false,
+    action: null
+  });
+
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const location = useLocation();
   const currentPath = location.pathname;
@@ -123,6 +144,73 @@ export default function MainLayout() {
     }
   }, [isDarkMode]);
 
+  const fetchEvents = async () => {
+    try {
+      const data = await api.getEvents();
+      if (data && Array.isArray(data)) {
+        setEvents(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch events', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchEvents();
+    const interval = setInterval(fetchEvents, 3600000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const mergedEvents = useMemo(() => {
+    const missingEvents: AppEvent[] = [];
+    if (editMode) {
+      restaurants.forEach(r => {
+        const hasCuisine = !!r.cuisine;
+        const hasLocation = !!r.locationName;
+        const rDishes = dishes.filter(d => d.restaurantId === r.id);
+        const hasDishes = rDishes.length > 0;
+        
+        if (!hasCuisine || !hasLocation || !hasDishes) {
+          const missingFields = [];
+          if (!hasCuisine) missingFields.push('Cuisine');
+          if (!hasLocation) missingFields.push('Location');
+          if (!hasDishes) missingFields.push('Dishes');
+          
+          missingEvents.push({
+            id: `missing-${r.id}`,
+            type: 'warning',
+            message: `⚠️ Missing info for ${r.name}: ${missingFields.join(', ')}`,
+            created_at: new Date().toISOString(),
+            link_url: `/restaurant/${r.id}`
+          });
+        }
+      });
+    }
+    return [...missingEvents, ...events];
+  }, [events, restaurants, dishes, editMode]);
+
+  useEffect(() => {
+    const lastSeenId = localStorage.getItem('last_seen_event_id');
+    if (!lastSeenId && mergedEvents.length > 0) {
+      setUnreadCount(mergedEvents.length);
+    } else if (lastSeenId) {
+      const index = mergedEvents.findIndex(e => e.id === lastSeenId);
+      if (index > 0) setUnreadCount(index);
+      else if (index === -1 && mergedEvents.length > 0) setUnreadCount(mergedEvents.length); // If last seen event is gone (e.g. fixed missing info), reset unread count
+      else setUnreadCount(0);
+    } else {
+      setUnreadCount(0);
+    }
+  }, [mergedEvents]);
+
+  const handleBellClick = () => {
+    setShowNotifications(!showNotifications);
+    if (!showNotifications && mergedEvents.length > 0) {
+      setUnreadCount(0);
+      localStorage.setItem('last_seen_event_id', mergedEvents[0].id);
+    }
+  };
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     setStatusMessage(null);
@@ -137,6 +225,81 @@ export default function MainLayout() {
     } finally {
       setIsRefreshing(false);
     }
+  };
+
+  const executePublishAll = async () => {
+    setIsProcessing(true);
+    setStatusMessage('Publishing to Instagram...');
+    try {
+      const unpublishedRestaurants = Object.values(restaurants).filter(r => !r.instaPublished);
+      if (unpublishedRestaurants.length === 0) {
+        addToast('Everything is already published!', 'info');
+        setStatusMessage(null);
+        setIsProcessing(false);
+        return;
+      }
+
+      let count = 0;
+      for (const r of unpublishedRestaurants) {
+        setStatusMessage(`Publishing ${r.name} (${count + 1}/${unpublishedRestaurants.length})...`);
+        const rDishes = Object.values(dishes).filter(d => d.restaurantId === r.id);
+        
+        const payload = { restaurantImage: '', dishImages: {} as Record<string, string> };
+        try {
+          payload.restaurantImage = await processInstagramImage(r, 'restaurant');
+        } catch (e) {
+          console.warn('Failed to process image for', r.name, e);
+        }
+
+        for (const d of rDishes) {
+          try {
+            payload.dishImages[d.id] = await processInstagramImage(d, 'dish', r.cuisine);
+          } catch (e) {
+            console.warn('Failed to process image for dish', d.name, e);
+          }
+        }
+
+        // Upload and publish
+        const uploadedRestaurantUrl = payload.restaurantImage ? await api.uploadImage(payload.restaurantImage) : '';
+        const uploadedDishUrls: Record<string, string> = {};
+        for (const [dishId, dataUrl] of Object.entries(payload.dishImages)) {
+          uploadedDishUrls[dishId] = await api.uploadImage(dataUrl);
+        }
+
+        const structuredPayload = {
+          restaurantImageUrl: uploadedRestaurantUrl,
+          dishImageUrls: uploadedDishUrls
+        };
+
+        const res = await api.publishToInstagram(r.id, structuredPayload);
+        if (res.success) {
+          updateRestaurant(r.id, { instaPublished: true, instaPublishedAt: new Date().toISOString(), instaEditedPhotoUrl: uploadedRestaurantUrl });
+          for (const dishId of Object.keys(uploadedDishUrls)) {
+            updateDish(dishId, { instaPublished: true, instaPublishedAt: new Date().toISOString(), instaEditedPhotoUrl: uploadedDishUrls[dishId] });
+          }
+          count++;
+        } else {
+          console.error(`Failed to publish ${r.name}`);
+        }
+      }
+      addToast(`Published ${count} restaurants to Instagram!`, 'success');
+      setStatusMessage(null);
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to publish all to Instagram.', 'error');
+      setStatusMessage(null);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handlePublishAllInstagram = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Publish All to Instagram',
+      message: 'Publish all unpublished restaurants and dishes to Instagram? This may take a while.',
+      isDestructive: false,
+      action: executePublishAll
+    });
   };
 
   // Realtime updates have been removed as part of API migration.
@@ -171,39 +334,61 @@ export default function MainLayout() {
     }
   };
 
-  const clearTransactionalData = async () => {
-    if (!window.confirm('Clear only transactional data (restaurants and dishes)?')) return;
+  const executeClearTransactionalData = async () => {
     setIsProcessing(true);
-    setStatusMessage(null);
+    setStatusMessage('Clearing transactional data...');
     try {
       for (const tableName of TRANSACTIONAL_TABLES) {
         await clearTableByIds(tableName);
       }
       await fetchData();
-      setStatusMessage('Transactional data cleared.');
+      addToast('Transactional data cleared.', 'success');
+      setStatusMessage(null);
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Failed to clear transactional data.');
+      addToast(error instanceof Error ? error.message : 'Failed to clear transactional data.', 'error');
+      setStatusMessage(null);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const clearAllData = async () => {
-    if (!window.confirm('Clear all data in all app tables?')) return;
+  const clearTransactionalData = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Clear Transactional Data',
+      message: 'Are you sure you want to clear only transactional data (restaurants and dishes)? This cannot be undone.',
+      isDestructive: true,
+      action: executeClearTransactionalData
+    });
+  };
+
+  const executeClearAllData = async () => {
     setIsProcessing(true);
-    setStatusMessage(null);
+    setStatusMessage('Clearing all data...');
     try {
       const clearOrder = [...IMPORT_ORDER].reverse();
       for (const tableName of clearOrder) {
         await clearTableByIds(tableName);
       }
       await fetchData();
-      setStatusMessage('All data cleared.');
+      addToast('All data cleared.', 'success');
+      setStatusMessage(null);
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Failed to clear all data.');
+      addToast(error instanceof Error ? error.message : 'Failed to clear all data.', 'error');
+      setStatusMessage(null);
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const clearAllData = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Clear All Data',
+      message: 'Are you sure you want to clear all data in all app tables? This cannot be undone.',
+      isDestructive: true,
+      action: executeClearAllData
+    });
   };
 
   const importDataFromFile = async (file: File | null) => {
@@ -264,15 +449,21 @@ export default function MainLayout() {
     }
   };
 
-  const handleLoginSubmit = (e: FormEvent) => {
+  const handleLoginSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (loginPassword === 'soboite123') {
-      setEditMode(true);
-      setShowLoginModal(false);
-      setLoginPassword('');
-      setLoginError(false);
-    } else {
+    try {
+      const res = await api.loginAdmin(loginPassword.trim());
+      if (res && res.success) {
+        setEditMode(true);
+        setShowLoginModal(false);
+        setLoginPassword('');
+        setLoginError(false);
+      } else {
+        setLoginError(true);
+      }
+    } catch (e) {
       setLoginError(true);
+      console.error(e);
     }
   };
 
@@ -306,14 +497,29 @@ export default function MainLayout() {
               Top picks
             </Link>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowMobileMenu(true)}
-            className="inline-flex items-center justify-center rounded-xl bg-transparent p-2 text-gray-700 hover:bg-gray-100 sm:hidden"
-            aria-label="Open menu"
-          >
-            <Menu size={18} />
-          </button>
+          <div className="flex items-center gap-2 sm:hidden">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={handleBellClick}
+                className="inline-flex items-center justify-center rounded-xl bg-transparent p-2 text-gray-700 hover:bg-gray-100 relative"
+                aria-label="Notifications"
+              >
+                <Bell size={18} />
+                {unreadCount > 0 && (
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+                )}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowMobileMenu(true)}
+              className="inline-flex items-center justify-center rounded-xl bg-transparent p-2 text-gray-700 hover:bg-gray-100"
+              aria-label="Open menu"
+            >
+              <Menu size={18} />
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -322,6 +528,48 @@ export default function MainLayout() {
               👋 HELLO HELLO HELLO, {userFirstName.toUpperCase()}!
             </span>
           )}
+
+          <div className="hidden sm:block relative">
+            <button
+              type="button"
+              onClick={handleBellClick}
+              className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 transition relative"
+            >
+              <Bell size={16} className="text-gray-600" />
+              {unreadCount > 0 && (
+                <span className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
+              )}
+            </button>
+
+            {showNotifications && (
+              <div className="absolute right-0 mt-2 w-80 rounded-2xl border border-gray-200 bg-white shadow-xl py-2 z-[3100] max-h-96 overflow-y-auto">
+                <div className="px-4 py-2 border-b border-gray-100">
+                  <h3 className="font-bold text-gray-800">Notifications</h3>
+                </div>
+                {mergedEvents.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-gray-500">
+                    No recent events.
+                  </div>
+                ) : (
+                  <div className="flex flex-col">
+                    {mergedEvents.map((evt) => (
+                      <Link
+                        key={evt.id}
+                        to={evt.link_url || '#'}
+                        onClick={() => setShowNotifications(false)}
+                        className={`px-4 py-3 hover:bg-gray-50 border-b border-gray-50 last:border-0 transition-colors ${evt.id.startsWith('missing-') ? 'bg-amber-50/30' : ''}`}
+                      >
+                        <p className="text-sm font-medium text-gray-800 mb-1">{evt.message}</p>
+                        <p className="text-xs text-gray-400">
+                          {new Date(evt.created_at).toLocaleDateString()} {new Date(evt.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             disabled={isRefreshing || networkBusy || isProcessing}
@@ -411,6 +659,16 @@ export default function MainLayout() {
                       >
                         <DatabaseZap size={14} />
                         Delete transactional data
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isProcessing}
+                        onClick={() => { setShowSettings(false); void handlePublishAllInstagram(); }}
+                        className="w-full inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed mt-2"
+                      >
+                        <Share2 size={14} />
+                        Publish All to Instagram
                       </button>
 
                       <button
@@ -538,6 +796,14 @@ export default function MainLayout() {
                   >
                     <DatabaseZap size={14} /> Clear all data
                   </button>
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={() => { setShowMobileMenu(false); void handlePublishAllInstagram(); }}
+                    className="w-full inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-100"
+                  >
+                    <Share2 size={14} /> Publish All to Instagram
+                  </button>
                 </div>
               )}
 
@@ -620,11 +886,16 @@ export default function MainLayout() {
               </button>
             </div>
             <form onSubmit={handleLoginSubmit} className="p-6">
+              {/* Hidden username to help password managers */}
+              <input type="text" name="username" autoComplete="username" value="admin" className="hidden" readOnly />
               <div className="mb-4">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Password</label>
                 <div className="relative">
                   <input
+                    id="admin-password"
+                    name="password"
                     type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
                     autoFocus
                     required
                     value={loginPassword}
@@ -668,6 +939,8 @@ export default function MainLayout() {
                 <label className="block text-sm font-semibold text-gray-700 mb-2">First Name</label>
                 <input
                   type="text"
+                  name="given-name"
+                  autoComplete="given-name"
                   autoFocus
                   required
                   value={regFirstName}
@@ -680,6 +953,8 @@ export default function MainLayout() {
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Last Name (Optional)</label>
                 <input
                   type="text"
+                  name="family-name"
+                  autoComplete="family-name"
                   value={regLastName}
                   onChange={(e) => setRegLastName(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-black transition shadow-inner"
@@ -710,6 +985,16 @@ export default function MainLayout() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        isDestructive={confirmModal.isDestructive}
+        onConfirm={() => {
+          if (confirmModal.action) void confirmModal.action();
+        }}
+        onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

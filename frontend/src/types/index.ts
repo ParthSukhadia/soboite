@@ -5,6 +5,17 @@ export interface PhotoEntry {
   type?: 'image' | 'video';
 }
 
+export interface DishGeminiAnalysis {
+  id?: string;
+  pros: string[];
+  cons: string[];
+  summary: string;
+  caption?: string;
+  hashtags?: string[];
+  verdict?: string;
+  rank?: 1 | 2 | 3 | null;
+}
+
 export interface Restaurant {
   id: string;
   name: string;
@@ -24,6 +35,9 @@ export interface Restaurant {
   serviceRating?: number;
   createdAt?: number;
   likeCount?: number;
+  instaPublished?: boolean;
+  instaPublishedAt?: string;
+  instaEditedPhotoUrl?: string;
 }
 
 export interface DishReview {
@@ -49,7 +63,11 @@ export interface Dish {
   isRecommended?: boolean;
   cuisine?: string;
   flavorTags?: string[];
+  serves?: string;
   likeCount?: number;
+  instaPublished?: boolean;
+  instaPublishedAt?: string;
+  instaEditedPhotoUrl?: string;
 }
 
 export interface TopPickCategory {
@@ -63,4 +81,13 @@ export interface TopPickRestaurant {
   category_id: string;
   restaurant_id: string;
   position: number;
+}
+
+export interface AppEvent {
+  id: string;
+  type: string;
+  message: string;
+  link_url?: string;
+  created_at: string;
+  user_id?: string;
 }

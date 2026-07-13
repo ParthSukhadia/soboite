@@ -14,7 +14,8 @@ import {
   ThumbsUp,
   ThumbsDown,
   X,
-  Bell
+  Bell,
+  Camera
 } from "lucide-react";
 import { useForm as useRHForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -23,6 +24,10 @@ import TagSelector from "../components/TagSelector";
 import PriceLevelIcon from "../components/PriceLevelIcon";
 import PhotoCarousel from "../components/PhotoCarousel";
 import CachedImage from "../components/CachedImage";
+
+import { InstagramPreviewModal } from "../components/InstagramPreviewModal";
+import { useToast } from '../components/Toast';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { useStore } from "../store/useStore";
 import { Dish, DishReview, PhotoEntry } from "../types";
 import { optimizeImage } from "../lib/imageOptimization";
@@ -37,6 +42,7 @@ const dishSchema = z.object({
   reviewDate: z.string().optional(),
   cuisine: z.string().optional(),
   isRecommended: z.boolean().optional(),
+  serves: z.string().optional(),
 });
 
 type DishForm = z.infer<typeof dishSchema>;
@@ -50,6 +56,7 @@ interface DishEditDraft {
   reviewDate: string;
   cuisine: string;
   isRecommended: boolean;
+  serves: string;
   photos: PhotoEntry[];
   primaryPhotoId?: string;
   tags: string[];
@@ -181,6 +188,15 @@ export default function RestaurantDetails() {
   const [likesList, setLikesList] = useState<string[]>([]);
   const [isLoadingLikes, setIsLoadingLikes] = useState(false);
 
+  const { addToast } = useToast();
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; isDestructive: boolean; action: (() => Promise<void> | void) | null }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    isDestructive: false,
+    action: null
+  });
+
   const openLikesList = async (targetId: string, type: 'restaurant' | 'dish') => {
     setLikesModal({ isOpen: true, type, id: targetId });
     setIsLoadingLikes(true);
@@ -302,6 +318,7 @@ export default function RestaurantDetails() {
       cuisine: string;
       tags: string[];
       isRecommended: boolean;
+      serves: string;
     }>
   >([]);
   const [uploadChoiceOpen, setUploadChoiceOpen] = useState(false);
@@ -310,6 +327,8 @@ export default function RestaurantDetails() {
   const [editingDishId, setEditingDishId] = useState<string | null>(null);
   const [editingDishDraft, setEditingDishDraft] =
     useState<DishEditDraft | null>(null);
+
+  const [showInstagramPreview, setShowInstagramPreview] = useState(false);
 
   const [isSavingDish, setIsSavingDish] = useState(false);
   const [isSavingRestaurantPhoto, setIsSavingRestaurantPhoto] = useState(false);
@@ -341,6 +360,7 @@ export default function RestaurantDetails() {
       reviewDate: new Date().toISOString().slice(0, 10),
       cuisine: "",
       isRecommended: false,
+      serves: "",
     },
   });
 
@@ -419,6 +439,7 @@ export default function RestaurantDetails() {
           cuisine: "",
           tags: [] as string[],
           isRecommended: false,
+          serves: "",
         };
       });
       return next;
@@ -519,16 +540,28 @@ export default function RestaurantDetails() {
     }
   };
 
-  const handleDeleteRestaurant = async () => {
-    if (isApiBusy) return;
-    if (!confirm("Delete this restaurant and all its dishes?")) return;
+  const executeDeleteRestaurant = async () => {
     setIsDeletingRestaurant(true);
     navigate("/", { replace: true });
     try {
       await deleteRestaurant(restaurant.id);
+      addToast('Restaurant deleted', 'success');
+    } catch (e) {
+      addToast('Failed to delete restaurant', 'error');
     } finally {
       setIsDeletingRestaurant(false);
     }
+  };
+
+  const handleDeleteRestaurant = () => {
+    if (isApiBusy) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Restaurant',
+      message: 'Are you sure you want to delete this restaurant and all its dishes? This cannot be undone.',
+      isDestructive: true,
+      action: executeDeleteRestaurant
+    });
   };
 
   const handleRestaurantMetricUpdate = async (
@@ -546,16 +579,65 @@ export default function RestaurantDetails() {
     }
   };
 
-  const handlePushNotification = async () => {
-    if (!restaurant || isApiBusy) return;
-    if (!confirm(`Send push notification for ${restaurant.name}?`)) return;
-    
+  const executePushNotification = async () => {
     try {
       await api.sendPushNotification(restaurant.name);
-      alert('Notification sent successfully!');
+      addToast('Notification sent successfully!', 'success');
     } catch (err: any) {
       console.error('Push notification failed:', err);
-      alert('Notification simulated (Endpoint missing). Sent message to enabled users.');
+      addToast('Notification simulated (Endpoint missing). Sent message to enabled users.', 'info');
+    }
+  };
+
+  const handlePushNotification = () => {
+    if (!restaurant || isApiBusy) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Send Push Notification',
+      message: `Send push notification for ${restaurant.name}?`,
+      isDestructive: false,
+      action: executePushNotification
+    });
+  };
+
+  const handlePublishInstagram = async () => {
+    if (!restaurant || isApiBusy) return;
+    setShowInstagramPreview(true);
+  };
+
+  const handleConfirmPublishInstagram = async (payload: { restaurantImage: string, dishImages: Record<string, string>, caption?: string, dishAnalyses?: any[] }) => {
+    if (!restaurant) return;
+    try {
+      addToast('Uploading custom images and publishing to Instagram... This may take a few seconds.', 'info');
+      
+      const uploadedRestaurantUrl = payload.restaurantImage ? await api.uploadImage(payload.restaurantImage) : '';
+      
+      const uploadedDishUrls: Record<string, string> = {};
+      for (const [dishId, dataUrl] of Object.entries(payload.dishImages)) {
+        uploadedDishUrls[dishId] = await api.uploadImage(dataUrl);
+      }
+      
+      const structuredPayload = {
+        restaurantImageUrl: uploadedRestaurantUrl,
+        dishImageUrls: uploadedDishUrls,
+        caption: payload.caption,
+        dishAnalyses: payload.dishAnalyses
+      };
+
+      const res = await api.publishToInstagram(restaurant.id, structuredPayload);
+      if (res.success) {
+        addToast('Successfully published to Instagram!' + (res.url ? ` URL: ${res.url}` : ''), 'success');
+        updateRestaurant(restaurant.id, { instaPublished: true, instaPublishedAt: new Date().toISOString(), instaEditedPhotoUrl: uploadedRestaurantUrl });
+        // Also update dishes
+        for (const _dishId of Object.keys(uploadedDishUrls)) {
+          // You could call updateDish if you have it in context, or just reload.
+        }
+      } else {
+        addToast('Failed to publish to Instagram.', 'error');
+      }
+    } catch (err: any) {
+      console.error('Instagram publish failed:', err);
+      addToast('Failed to publish to Instagram: ' + err.message, 'error');
     }
   };
 
@@ -593,22 +675,6 @@ export default function RestaurantDetails() {
     }
   };
 
-  const handleQuickToggleRecommended = async (dish: Dish) => {
-    if (isApiBusy) return;
-    setIsSavingDish(true);
-    try {
-      await updateDish(dish.id, { isRecommended: !dish.isRecommended });
-      if (editingDishId === dish.id && editingDishDraft) {
-        setEditingDishDraft({
-          ...editingDishDraft,
-          isRecommended: !dish.isRecommended,
-        });
-      }
-    } finally {
-      setIsSavingDish(false);
-    }
-  };
-
   const handleInlineDishRatingUpdate = async (dish: Dish, nextRating: number) => {
     if (isApiBusy) return;
     const safeRating = Math.max(1, Math.min(5, nextRating));
@@ -640,6 +706,7 @@ export default function RestaurantDetails() {
         new Date().toISOString().slice(0, 10),
       cuisine: dish.cuisine ?? "",
       isRecommended: Boolean(dish.isRecommended),
+      serves: dish.serves ?? "",
       photos,
       primaryPhotoId: resolvePrimaryPhotoId(photos, dish.primaryPhotoId),
       tags: dish.flavorTags ?? [],
@@ -772,6 +839,7 @@ export default function RestaurantDetails() {
           primaryPhotoId,
           isRecommended: Boolean(entry.isRecommended),
           cuisine: entry.cuisine || undefined,
+          serves: entry.serves?.trim() || undefined,
           flavorTags: entry.tags.length > 0 ? entry.tags : undefined,
         });
       }));
@@ -853,9 +921,9 @@ export default function RestaurantDetails() {
         flavorTags:
           editingDishDraft.tags.length > 0 ? editingDishDraft.tags : undefined,
         photos: photos.length > 0 ? photos : undefined,
-        primaryPhotoId,
         imageStorageUrl,
         isRecommended: editingDishDraft.isRecommended,
+        serves: editingDishDraft.serves.trim() || undefined,
       });
 
       closeEditDish();
@@ -958,6 +1026,7 @@ export default function RestaurantDetails() {
         photos: newDishPhotos.length > 0 ? newDishPhotos : undefined,
         primaryPhotoId,
         isRecommended: Boolean(data.isRecommended),
+        serves: data.serves?.trim() || undefined,
         cuisine: cuisineValue || undefined,
         flavorTags: selectedDishTags.length > 0 ? selectedDishTags : undefined,
       });
@@ -1098,14 +1167,25 @@ export default function RestaurantDetails() {
             {restaurant.name}
           </h1>
           {editMode && (
-            <button 
-              onClick={handlePushNotification}
-              disabled={isApiBusy}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-60"
-            >
-              <Bell size={16} />
-              Push Notification
-            </button>
+            <div className="flex gap-2 shrink-0 flex-wrap">
+
+              <button 
+                onClick={handlePublishInstagram}
+                disabled={isApiBusy}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-60"
+              >
+                <Camera size={16} />
+                Publish to Instagram
+              </button>
+              <button 
+                onClick={handlePushNotification}
+                disabled={isApiBusy}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-60"
+              >
+                <Bell size={16} />
+                Push Notification
+              </button>
+            </div>
           )}
         </div>
         {typeof overallRating === "number" && (
@@ -1325,19 +1405,6 @@ export default function RestaurantDetails() {
                     className={`bg-white rounded-2xl p-5 shadow-[0_2px_10px_rgba(0,0,0,0.04)] border relative group transition-all duration-200 ${dish.isRecommended ? "border-amber-200 bg-gradient-to-br from-white via-white to-amber-50/15" : "border-gray-100"}`}
                   >
                     <div className="absolute top-3 right-3 flex items-center gap-1 z-10">
-                      <button
-                        type="button"
-                        disabled={isApiBusy}
-                        onClick={() => handleQuickToggleRecommended(dish)}
-                        className={`p-2 rounded-full border ${dish.isRecommended ? "bg-amber-50 text-amber-500 border-amber-200" : "bg-white text-gray-400 border-gray-200"} disabled:opacity-60 disabled:cursor-not-allowed`}
-                        aria-label="Toggle recommended"
-                        title="Mark as recommended"
-                      >
-                        <Star
-                          size={14}
-                          fill={dish.isRecommended ? "currentColor" : "none"}
-                        />
-                      </button>
                       {editMode && (
                         <button
                           type="button"
@@ -1377,11 +1444,6 @@ export default function RestaurantDetails() {
                               noteSize={20}
                               className="h-8 w-8 text-gray-300"
                             />
-                            {typeof dish.actualPrice === "number" && (
-                              <span className="text-gray-400 font-semibold text-xs">
-                                ₹{dish.actualPrice}
-                              </span>
-                            )}
                           </div>
                         </div>
                       ) : dishPhotos.length > 0 ? (
@@ -1397,11 +1459,6 @@ export default function RestaurantDetails() {
                               noteSize={20}
                               className="h-8 w-8"
                             />
-                            {typeof dish.actualPrice === "number" && (
-                              <span className="text-gray-900 font-semibold text-xs">
-                                ₹{dish.actualPrice}
-                              </span>
-                            )}
                           </div>
                         </div>
                       ) : null}
@@ -1437,52 +1494,59 @@ export default function RestaurantDetails() {
                             </div>
                           )}
                         <div className="flex items-start justify-between gap-3 mb-2">
-                          <h3 className="text-lg font-bold text-gray-900 leading-tight flex flex-wrap items-center gap-2">
+                          <h3 className="text-base sm:text-lg font-bold text-gray-900 leading-tight flex flex-wrap items-center gap-2 break-words whitespace-normal">
                             {dish.name}
-                            {dish.isRecommended && (
-                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                                ★ Recommended
-                              </span>
-                            )}
                           </h3>
                         </div>
 
-                        <div className="flex gap-1 mb-3 text-yellow-400">
-                          {[...Array(5)].map((_, i) => (
-                            editMode ? (
-                              <button
-                                key={i}
-                                type="button"
-                                disabled={isApiBusy}
-                                onClick={() => handleInlineDishRatingUpdate(dish, i + 1)}
-                                className={`transition-colors ${i < dish.rating ? "text-yellow-400" : "text-gray-300"} disabled:opacity-70 disabled:cursor-not-allowed`}
-                                aria-label={`Set rating to ${i + 1} out of 5`}
-                              >
+                        <div className="flex flex-col gap-1 mb-3">
+                          <div className="flex gap-1 text-yellow-400">
+                            {[...Array(5)].map((_, i) => (
+                              editMode ? (
+                                <button
+                                  key={i}
+                                  type="button"
+                                  disabled={isApiBusy}
+                                  onClick={() => handleInlineDishRatingUpdate(dish, i + 1)}
+                                  className={`transition-colors ${i < dish.rating ? "text-yellow-400" : "text-gray-300"} disabled:opacity-70 disabled:cursor-not-allowed`}
+                                  aria-label={`Set rating to ${i + 1} out of 5`}
+                                >
+                                  <Star
+                                    size={16}
+                                    fill={i < dish.rating ? "currentColor" : "none"}
+                                    color={i < dish.rating ? "currentColor" : "#e5e7eb"}
+                                  />
+                                </button>
+                              ) : (
                                 <Star
+                                  key={i}
                                   size={16}
                                   fill={i < dish.rating ? "currentColor" : "none"}
                                   color={i < dish.rating ? "currentColor" : "#e5e7eb"}
                                 />
-                              </button>
-                            ) : (
-                              <Star
-                                key={i}
-                                size={16}
-                                fill={i < dish.rating ? "currentColor" : "none"}
-                                color={i < dish.rating ? "currentColor" : "#e5e7eb"}
-                              />
-                            )
-                          ))}
+                              )
+                            ))}
+                          </div>
+                          {dish.isRecommended && (
+                            <div className="text-sm font-bold text-red-500 mt-1 flex items-center gap-1">
+                              😋 Must try
+                            </div>
+                          )}
+                          {typeof dish.actualPrice === "number" && (
+                            <div className="text-sm font-semibold text-gray-800 mt-1">
+                              Price: ₹{dish.actualPrice}
+                            </div>
+                          )}
+                          {dish.serves && (
+                            <div className="text-sm font-semibold text-gray-800 mt-1 flex items-center gap-1">
+                              👥 Serves: {dish.serves}
+                            </div>
+                          )}
                         </div>
 
                         {(dish.cuisine ||
                           (dish.flavorTags && dish.flavorTags.length > 0)) && (
                           <div className="flex flex-wrap gap-2 mb-3">
-                            {dish.cuisine && (
-                              <span className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded-full">
-                                {dish.cuisine}
-                              </span>
-                            )}
                             {dish.flavorTags?.map((tag) => (
                               <span
                                 key={tag}
@@ -1502,11 +1566,6 @@ export default function RestaurantDetails() {
                               noteSize={16}
                               className="h-6 w-6"
                             />
-                            {typeof dish.actualPrice === "number" && (
-                              <span className="text-gray-900 font-semibold text-xs">
-                                ₹{dish.actualPrice}
-                              </span>
-                            )}
                           </div>
                         )}
 
@@ -1595,6 +1654,22 @@ export default function RestaurantDetails() {
                                   actualPrice: event.target.value,
                                 })
                               }
+                              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium mb-1">
+                              Serves
+                            </label>
+                            <input
+                              type="text"
+                              value={editingDishDraft.serves}
+                              onChange={(event) =>
+                                updateEditingDraft({
+                                  serves: event.target.value,
+                                })
+                              }
+                              placeholder="e.g. 2/more"
                               className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
                             />
                           </div>
@@ -1884,6 +1959,17 @@ export default function RestaurantDetails() {
                       placeholder="250"
                     />
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Serves
+                    </label>
+                    <input
+                      type="text"
+                      {...register("serves")}
+                      className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                      placeholder="e.g. 2/more"
+                    />
+                  </div>
                 </div>
 
                 <div>
@@ -2051,6 +2137,16 @@ export default function RestaurantDetails() {
                                           type="number"
                                           value={entry?.actualPrice ?? ""}
                                           onChange={(e) => updateBatchEntry(photo.id, { actualPrice: e.target.value })}
+                                          className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl"
+                                        />
+                                      </div>
+                                      <div>
+                                        <div className="text-xs font-medium mb-1">Serves</div>
+                                        <input
+                                          type="text"
+                                          value={entry?.serves ?? ""}
+                                          onChange={(e) => updateBatchEntry(photo.id, { serves: e.target.value })}
+                                          placeholder="e.g. 2/more"
                                           className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl"
                                         />
                                       </div>
@@ -2240,7 +2336,7 @@ export default function RestaurantDetails() {
                                   />
                                 </div>
 
-                                <div className="grid gap-3 sm:grid-cols-3">
+                                <div className="grid gap-3 sm:grid-cols-4">
                                   <div>
                                     <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">
                                       Rating
@@ -2293,6 +2389,22 @@ export default function RestaurantDetails() {
                                       />
                                       Mark as recommended
                                     </label>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">
+                                      Serves
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={entry?.serves ?? ""}
+                                      onChange={(event) =>
+                                        updateBatchEntry(photo.id, {
+                                          serves: event.target.value,
+                                        })
+                                      }
+                                      placeholder="e.g. 2/more"
+                                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                                    />
                                   </div>
                                 </div>
 
@@ -2517,6 +2629,26 @@ export default function RestaurantDetails() {
           </motion.div>
         )}
       </AnimatePresence>
+
+
+
+      <InstagramPreviewModal
+        isOpen={showInstagramPreview}
+        onClose={() => setShowInstagramPreview(false)}
+        onPublish={handleConfirmPublishInstagram}
+        restaurant={restaurant}
+        dishes={restaurantDishes}
+      />
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        isDestructive={confirmModal.isDestructive}
+        onConfirm={() => {
+          if (confirmModal.action) void confirmModal.action();
+        }}
+        onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

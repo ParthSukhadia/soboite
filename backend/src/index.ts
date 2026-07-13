@@ -1,9 +1,13 @@
 // backend/src/index.ts
 import { Hono } from 'hono'
+import { logger } from 'hono/logger'
 import { cors } from 'hono/cors'
 import { createSupabaseClient } from '../lib/supabase'
+import { Zernio } from '@zernio/node'
+import { GoogleGenAI, Type } from '@google/genai'
 
 const app = new Hono()
+app.use('*', logger())
 const getSupabase = (c: any) => createSupabaseClient(c.env)
 
 const normalizeRequestBody = (body: any) => {
@@ -28,20 +32,29 @@ app.get('/', (c) => c.text('Supabase backend running. Use /health or /api/* endp
 // Health check
 app.get('/health', (c) => c.text('OK'))
 
+app.get('/api/events', async (c) => {
+  const supabase = getSupabase(c);
+  const { data, error } = await supabase.from('app_events').select('*').order('created_at', { ascending: false }).limit(50);
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
+});
+
 // Example: Get all restaurants (replace with your actual schema)
 app.get('/api/restaurants', async (c) => {
   const supabase = getSupabase(c)
   const { data, error } = await supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, like_count')
+  console.log('[SUPABASE RESTAURANTS RESP]', { error, dataLength: data?.length, dataPreview: data?.slice(0, 2) });
   if (error) return c.json({ error: error.message }, 500)
-return c.json(data);
+  return c.json(data);
 })
 
 // Get all dishes
 app.get('/api/dishes', async (c) => {
   const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('dishes_with_likes').select('id, name, restaurant_id, rating, price_level, actual_price, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, like_count')
+  const { data, error } = await supabase.from('dishes_with_likes').select('id, name, restaurant_id, rating, price_level, actual_price, serves, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, like_count')
+  console.log('[SUPABASE DISHES RESP]', { error, dataLength: data?.length, dataPreview: data?.slice(0, 2) });
   if (error) return c.json({ error: error.message }, 500)
-return c.json(data);
+  return c.json(data);
 })
 
 // Get reference data
@@ -76,8 +89,18 @@ app.get('/auth/google/callback', (c) => {
 app.post('/api/restaurants', async (c) => {
   const supabase = getSupabase(c);
   const body = normalizeRequestBody(await c.req.json());
-  const { error, data } = await supabase.from('restaurants').insert(body);
+  const { error, data } = await supabase.from('restaurants').insert(body).select();
   if (error) return c.json({ error: error.message }, 500);
+
+  if (data && data.length > 0) {
+    const resto = data[0];
+    await supabase.from('app_events').insert({
+      type: 'RESTO_ADDED',
+      message: `New restaurant added: ${resto.name}`,
+      link_url: `/restaurant/${resto.id}`
+    });
+  }
+
   // Return inserted rows without selecting missing columns
   return c.json(data);
 });
@@ -210,7 +233,7 @@ app.post('/api/top-picks/categories/:id/restaurants', async (c) => {
 });
 
 // Get restaurant photos (placeholder)
-app.get('/api/restaurant-photos/:id', async (c) => {
+app.get('/api/restaurants/:id/photos', async (c) => {
   // TODO: implement actual photo fetching logic
   return c.json({ restaurant: null, dishes: [] });
 });
@@ -228,16 +251,17 @@ app.post('/api/upload-image', async (c) => {
   }
 
   try {
+
     const [header, base64] = dataUrl.split(',');
     const mimeMatch = header.match(/:(.*?);/);
     const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
     const fileExt = mimeType.split('/')[1] || 'jpg';
-    
+
     // Decode base64 to Uint8Array
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
+      bytes[i] = binary.charCodeAt(i);
     }
     const arrayBuffer = bytes.buffer;
 
@@ -272,7 +296,7 @@ app.get('/api/export', async (c) => {
       return { table, data, error };
     })
   );
-  
+
   const firstError = tableResults.find(r => r.error);
   if (firstError) return c.json({ error: firstError.error?.message }, 500);
 
@@ -283,22 +307,183 @@ app.get('/api/export', async (c) => {
   return c.json(exportData);
 });
 
+// --- Gemini API Endpoint ---
+app.post('/api/gemini/analyze-restaurant', async (c) => {
+  const apiKey = (c.env as any).GEMINI_API_KEY;
+  if (!apiKey) {
+    return c.json({ error: 'GEMINI_API_KEY is not configured in the backend.' }, 500);
+  }
+
+  try {
+    const { restaurant, dishes } = await c.req.json();
+    const supabase = getSupabase(c);
+
+    // CHECK DB FIRST
+    const { data: existingInsight, error: insightError } = await supabase
+      .from('ai_publish_insights')
+      .select('caption, dishes_data')
+      .eq('restaurant_id', restaurant.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (existingInsight && existingInsight.dishes_data && !insightError) {
+      console.log("=== Found existing insights in DB, skipping Gemini ===");
+      return c.json({
+        caption: existingInsight.caption,
+        dishes: existingInsight.dishes_data,
+        isCached: true
+      });
+    }
+
+    const genAI = new GoogleGenAI({ apiKey });
+
+    // Format the dishes info
+    const dishesInfo = dishes.map((d: any) => {
+      const revs = d.reviews || [];
+      const reviewText = revs.map((r: any) => `- "${r.text}"`).join('\n');
+      return `Dish ID: ${d.id}\nDish: ${d.name} (Rating: ${d.rating}/5)\nReviews:\n${reviewText}`;
+    }).join('\\n\\n');
+
+    const prompt = `
+You are a food critic and social media expert analyzing a restaurant and its dishes.
+Restaurant Name: ${restaurant.name}
+Cuisine: ${restaurant.cuisine || 'Various'}
+Location: ${restaurant.locationName || 'Unknown'}
+
+Here are the dishes and their reviews:
+${dishesInfo}
+
+First, for each dish, generate a short analysis (1-3 pros, 0-1 cons). Each point MUST be extremely concise (max 5-7 words).
+Second, generate a beautifully formatted Instagram caption for the entire restaurant.
+The caption MUST follow this exact structure (replace placeholders with actual data based on reviews).
+CRITICAL: You must include actual newline characters (\n) in the JSON string for the caption to preserve the line breaks. Do NOT put the text all on one line.
+
+[some emoji related to the dish or resto] [Catchy hook sentence related to the restaurant]
+
+📍 Restaurant:
+${restaurant.name}, ${restaurant.locationName || 'Location'}
+
+🍽 Must Try:
+• [Dish 1] ⭐⭐⭐⭐⭐
+• [Dish 2] ⭐⭐⭐⭐☆
+(List 2-3 dishes based on ratings)
+
+⭐ Overall Rating: [calculate overall out of 5 based on provided ratings]/5
+👥 Best For: [e.g. Date Night, Casual Dining, Family, etc. based on vibe]
+
+Review:
+[A 2-3 sentence engaging review of the restaurant combining thoughts from the dish reviews]
+
+✅ Would I revisit?
+[Yes/No/Maybe with a short reason]
+
+👇 Have you been here? What should I try next?
+
+📌 Save this post for your next food outing.
+
+#Hashtags (generate 5 relevant hashtags)
+
+Return ONLY a JSON object containing 'dishes' (array of dish analysis) and 'caption' (the formatted string).
+`;
+
+    // Enable API Logs
+
+
+    const response = await genAI.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            caption: {
+              type: Type.STRING,
+              description: 'The formatted Instagram caption',
+            },
+            dishes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  pros: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Short list of pros',
+                  },
+                  cons: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Short list of cons',
+                  },
+                  summary: {
+                    type: Type.STRING,
+                    description: 'Short summary sentence',
+                  },
+                },
+                required: ['id', 'pros', 'cons', 'summary'],
+              },
+            },
+          },
+          required: ['caption', 'dishes'],
+        },
+        temperature: 0.7,
+      },
+    });
+
+    if (response.text) {
+
+      const result = JSON.parse(response.text);
+      if (result.caption) {
+        // Replace literal string "\n" with actual newline character just in case LLM double escaped it
+        result.caption = result.caption.replace(/\\n/g, '\n');
+      }
+      return c.json(result);
+    }
+    return c.json({ error: 'Empty response from Gemini' }, 500);
+  } catch (error: any) {
+    console.error('Failed to analyze restaurant with Gemini:', error);
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+app.post('/api/gemini/save-insights', async (c) => {
+  const supabase = getSupabase(c);
+  try {
+    const { restaurantId, caption, dishesData } = await c.req.json();
+    if (!restaurantId) return c.json({ error: 'restaurantId is required' }, 400);
+
+    const { error } = await supabase.from('ai_publish_insights').insert({
+      restaurant_id: restaurantId,
+      caption: caption,
+      dishes_data: dishesData
+    });
+
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 app.post('/api/clear-table', async (c) => {
   const supabase = getSupabase(c);
   const { tableName, idColumn = 'id' } = await c.req.json();
-  
+
   const { data, error } = await supabase.from(tableName).select(idColumn);
   if (error) return c.json({ error: error.message }, 500);
-  
+
   const ids = (data ?? []).map((row: any) => row[idColumn]).filter(Boolean);
   if (ids.length === 0) return c.json({ success: true, deleted: 0 });
-  
+
   const chunkArray = (arr: any[], size: number) => {
     const res = [];
-    for(let i=0; i<arr.length; i+=size) res.push(arr.slice(i, i+size));
+    for (let i = 0; i < arr.length; i += size) res.push(arr.slice(i, i + size));
     return res;
   };
-  
+
   for (const chunk of chunkArray(ids, 500)) {
     const { error: delErr } = await (supabase as any).from(tableName).delete().in(idColumn, chunk);
     if (delErr) return c.json({ error: delErr.message }, 500);
@@ -309,15 +494,15 @@ app.post('/api/clear-table', async (c) => {
 app.post('/api/import-table', async (c) => {
   const supabase = getSupabase(c);
   const { tableName, rows, upsertKey } = await c.req.json();
-  
+
   if (!rows || rows.length === 0) return c.json({ success: true, imported: 0 });
-  
+
   const chunkArray = (arr: any[], size: number) => {
     const res = [];
-    for(let i=0; i<arr.length; i+=size) res.push(arr.slice(i, i+size));
+    for (let i = 0; i < arr.length; i += size) res.push(arr.slice(i, i + size));
     return res;
   };
-  
+
   for (const chunk of chunkArray(rows, 500)) {
     const { error } = await (supabase as any).from(tableName).upsert(chunk, { onConflict: upsertKey });
     if (error) return c.json({ error: error.message }, 500);
@@ -329,7 +514,7 @@ app.post('/api/import-table', async (c) => {
 app.post('/api/users', async (c) => {
   const supabase = getSupabase(c);
   const { deviceId, firstName, lastName } = await c.req.json();
-  
+
   if (!deviceId || !firstName) return c.json({ error: 'Missing required fields' }, 400);
 
   const { data, error } = await supabase
@@ -451,13 +636,13 @@ app.get('/api/restaurants/:id/likes', async (c) => {
     .select('users(first_name, last_name)')
     .eq('restaurant_id', restaurantId)
     .eq('is_like', true);
-  
+
   if (error) return c.json({ error: error.message }, 500);
-  
-  const names = (data || []).map((row: any) => 
+
+  const names = (data || []).map((row: any) =>
     `${row.users?.first_name || ''} ${row.users?.last_name || ''}`.trim()
   ).filter(Boolean);
-  
+
   return c.json({ names });
 });
 
@@ -469,35 +654,302 @@ app.get('/api/dishes/:id/likes', async (c) => {
     .select('users(first_name, last_name)')
     .eq('dish_id', dishId)
     .eq('is_like', true);
-  
+
   if (error) return c.json({ error: error.message }, 500);
-  
-  const names = (data || []).map((row: any) => 
+
+  const names = (data || []).map((row: any) =>
     `${row.users?.first_name || ''} ${row.users?.last_name || ''}`.trim()
   ).filter(Boolean);
-  
+
   return c.json({ names });
 });
 
 // Push Notifications Endpoint
 app.post('/api/push-notification', async (c) => {
   // In a real implementation, we would extract the admin token from headers
-  // For the test phase, we assume the frontend only calls this when logged in as admin
-  const body = await c.req.json();
-  const { message } = body;
-
-  if (!message) {
-    return c.json({ error: 'Message is required' }, 400);
-  }
-
-  // TODO: Actual Web Push Implementation
+  const { message } = await c.req.json();
+  // In a real app, this would use a web-push library and push to subscriptions in the DB
   // 1. Fetch all admin users' push subscriptions from the database
   // 2. Use web-push library with VAPID keys to send the payload
   // 3. Handle expired subscriptions
-  
-  console.log(`[PUSH NOTIFICATION] Simulated push sent to admins: "${message}"`);
-  
+
+
   return c.json({ success: true, message: "Push notification sent to all logged in admins" });
+});
+
+app.post('/api/admin/login', async (c) => {
+  try {
+    const { password } = await c.req.json();
+    if (!password) return c.json({ error: 'Password required' }, 400);
+
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+    // Pre-calculated SHA-256 hash for S0b0ite$$2026!
+    const expectedHash = 'efcbcfa30e8a5636fdd3c4349251b25538407871ac12441b149e2c435eec506f';
+
+    if (hashHex === expectedHash) {
+      return c.json({ success: true });
+    } else {
+      return c.json({ error: 'Invalid password' }, 401);
+    }
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Instagram Publish Endpoint
+app.post('/api/restaurants/:id/publish-instagram', async (c) => {
+  const supabase = getSupabase(c);
+  const id = c.req.param('id');
+
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    // Ignore error if body is empty or not JSON
+  }
+
+  const restaurantImageUrl = body.restaurantImageUrl;
+  const dishImageUrls = body.dishImageUrls || {};
+  let caption = body.caption;
+  const dishAnalyses = body.dishAnalyses || [];
+
+  const zernioApiKey = (c.env as any).ZERNIO_API_KEY;
+  const zernioAccountId = (c.env as any).ZERNIO_ACCOUNT_ID;
+
+  if (!zernioApiKey || !zernioAccountId) {
+    console.log("Missing Zernio credentials");
+    return c.json({ error: `Missing Zernio credentials. Ensure both ZERNIO_API_KEY and ZERNIO_ACCOUNT_ID are set in .env.` }, 400);
+  }
+
+  // Fetch restaurant and dishes
+  const { data: restaurant, error: restError } = await supabase.from('restaurants').select('*').eq('id', id).single();
+  if (restError || !restaurant) return c.json({ error: 'Restaurant not found' }, 404);
+
+  const { data: dishes, error: dishesError } = await supabase.from('dishes').select('*').eq('restaurant_id', id);
+  if (dishesError) return c.json({ error: 'Error fetching dishes' }, 500);
+
+  if (!caption) {
+    // Construct caption fallback
+    const hooks = [
+      `Don't leave ${restaurant.location_name || 'Mumbai'} without trying this.`,
+      `One of South Mumbai's most underrated spots.`,
+      `Worth the hype? Here's my verdict.`,
+      `Looking for good ${restaurant.cuisine || 'food'} in ${restaurant.location_name || 'South Mumbai'}?`,
+      `Your new favourite spot in ${restaurant.location_name || 'town'}?`
+    ];
+    const hook = hooks[Math.floor(Math.random() * hooks.length)];
+
+    const loc = restaurant.location_name ? `, ${restaurant.location_name}` : '';
+    const restoLoc = `📍 Restaurant:\n${restaurant.name}${loc}`;
+
+    let recommended = (dishes || []).filter(d => d.is_recommended);
+    if (recommended.length === 0 && dishes && dishes.length > 0) {
+      recommended = [...dishes].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 2);
+    }
+
+    let dishesText = '';
+    if (recommended.length > 0) {
+      dishesText = `🍽 Must Try:\n` + recommended.map(d => {
+        const rating = d.rating || 4;
+        const full = '⭐'.repeat(Math.floor(rating));
+        const empty = '☆'.repeat(5 - Math.floor(rating));
+        return `• ${d.name} ${full}${empty}`;
+      }).join('\n');
+    }
+
+    const dishAvg = (dishes && dishes.length > 0) ? (dishes.reduce((a: number, b: any) => a + (b.rating || 0), 0) / dishes.length) : 0;
+    let overallSum = 0; let overallCount = 0;
+    if (restaurant.ambience_rating) { overallSum += restaurant.ambience_rating; overallCount++; }
+    if (restaurant.service_rating) { overallSum += restaurant.service_rating; overallCount++; }
+    if (dishAvg > 0) { overallSum += dishAvg; overallCount++; }
+    const overall = overallCount > 0 ? (overallSum / overallCount).toFixed(1) : '4.5';
+
+    const cost = restaurant.cost_for_two || 1000;
+    const priceSymbols = cost > 1500 ? '₹₹₹' : cost > 600 ? '₹₹' : '₹';
+
+    const typeMap: Record<string, string> = {
+      'Cafe': '☕ Solo Work / Casual Meetup',
+      'Fine Dining': '❤️ Date Night',
+      'Pub / Bar': '👥 Friends / Drinks',
+      'Casual Dining': '👨‍👩‍👧 Families',
+      'Street Food': '🚶 Quick Bite',
+      'Dessert': '🍰 Sweet Cravings'
+    };
+    const bestFor = restaurant.type ? (typeMap[restaurant.type] || '👥 Friends & Family') : '👥 Friends & Family';
+
+    let facts = `⭐ Overall Rating: ${overall}/5\n💰 ${priceSymbols}\n👥 Best For: ${bestFor}`;
+    if (restaurant.veg_only) {
+      facts += `\n🥬 Veg Friendly: Yes`;
+    }
+
+    const reviewText = restaurant.notes ? `Review:\n${restaurant.notes}` : '';
+    const wouldRevisit = parseFloat(overall) >= 4.0 ? '✅ Would I revisit?\nAbsolutely.' : '🤔 Would I revisit?\nOnly for specific dishes.';
+
+    const ctas = [
+      '👇 Which place should I review next?',
+      '👇 Have you tried this place? What would you rate it?',
+      '👇 Tag someone you\'d take here!',
+      `📌 Save this post for your next trip to ${restaurant.location_name || 'South Mumbai'}.`
+    ];
+    const cta = ctas[Math.floor(Math.random() * ctas.length)];
+
+    const branding = `🍽 More curated food recommendations on Soboite`;
+
+    const baseHashtags = ['#SouthMumbai', '#MumbaiFood', '#MumbaiFoodie', '#FoodReview', '#RestaurantReview'];
+    if (restaurant.cuisine) baseHashtags.push(`#${restaurant.cuisine.replace(/[^a-zA-Z0-9]/g, '')}`);
+    if (restaurant.location_name) baseHashtags.push(`#${restaurant.location_name.replace(/[^a-zA-Z0-9]/g, '')}`);
+
+    const hashtagText = baseHashtags.join(' ');
+
+    caption = [
+      `🍕 ${hook}`,
+      restoLoc,
+      dishesText,
+      facts,
+      reviewText,
+      wouldRevisit,
+      cta,
+      branding,
+      hashtagText
+    ].filter(Boolean).join('\n\n');
+  }
+
+  let finalUrls: string[] = [];
+
+  if (restaurantImageUrl || Object.keys(dishImageUrls).length > 0) {
+    if (restaurantImageUrl) finalUrls.push(restaurantImageUrl);
+    if (dishes) {
+      dishes.forEach(dish => {
+        if (dishImageUrls[dish.id]) {
+          finalUrls.push(dishImageUrls[dish.id]);
+        }
+      });
+    }
+    finalUrls = finalUrls.slice(0, 10);
+  } else {
+    // Gather photos
+    const imageUrls: string[] = [];
+    if (restaurant.image_storage_url) {
+      imageUrls.push(restaurant.image_storage_url);
+    } else if (restaurant.photos && restaurant.photos.length > 0) {
+      imageUrls.push(restaurant.photos[0].url);
+    }
+
+    if (dishes) {
+      dishes.forEach(dish => {
+        if (dish.image_storage_url) {
+          imageUrls.push(dish.image_storage_url);
+        } else if (dish.photos && dish.photos.length > 0) {
+          imageUrls.push(dish.photos[0].url);
+        }
+      });
+    }
+
+    finalUrls = imageUrls.slice(0, 10); // Max 10 items for carousel
+  }
+
+  if (finalUrls.length === 0) {
+    return c.json({ error: 'No photos available to publish' }, 400);
+  }
+
+  try {
+    const zernio = new Zernio({ apiKey: zernioApiKey });
+    const result = await zernio.posts.createPost({
+      body: {
+        content: caption,
+        publishNow: true,
+        mediaItems: finalUrls.map(url => ({ url })),
+        platforms: [
+          {
+            platform: 'instagram',
+            accountId: zernioAccountId
+          }
+        ]
+      }
+    });
+
+    console.log("Zernio createPost response:", JSON.stringify(result, null, 2));
+
+    if (result.error) {
+      throw new Error(typeof result.error === 'string' ? result.error : JSON.stringify(result.error));
+    }
+
+    let postData = result.data as any;
+    const postId = postData?.id;
+
+    if (postId) {
+      console.log(`Post created successfully. Polling for status on post ${postId}...`);
+      // Poll up to 12 times, 5 seconds apart (total 60 seconds max)
+      for (let i = 0; i < 12; i++) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        const statusRes = await zernio.posts.getPost({ path: { postId } });
+        if (statusRes.error) {
+          console.error(`Error polling post ${postId}:`, JSON.stringify(statusRes.error));
+          // If we fail to fetch, just keep the last known postData and break
+          break;
+        }
+
+        postData = statusRes.data as any;
+        console.log(`Poll ${i + 1}/12: Post ${postId} status is '${postData?.status}'`);
+
+        // Check if the post reached a terminal state
+        if (['published', 'failed', 'partial', 'cancelled'].includes(postData?.status)) {
+          console.log(`Post ${postId} reached terminal status: ${postData?.status}`);
+          break;
+        }
+      }
+    }
+
+    if (postData?.status === 'published' || postData?.status === 'partial') {
+      // Update restaurant in DB
+      await supabase.from('restaurants').update({
+        insta_published: true,
+        insta_published_at: new Date().toISOString(),
+        insta_edited_photo_url: restaurantImageUrl || null
+      }).eq('id', id);
+
+      // Update dishes in DB
+      if (dishes && dishes.length > 0) {
+        for (const dish of dishes) {
+          const dishEditedUrl = dishImageUrls[dish.id];
+          if (dishEditedUrl) {
+            await supabase.from('dishes').update({
+              insta_published: true,
+              insta_published_at: new Date().toISOString(),
+              insta_edited_photo_url: dishEditedUrl
+            }).eq('id', dish.id);
+          }
+        }
+      }
+
+      // Log event
+      await supabase.from('app_events').insert({
+        type: 'RESTO_PUBLISHED',
+        message: `${restaurant.name} was published to Instagram!`,
+        link_url: `/restaurant/${id}`
+      });
+
+      // Save AI insights data
+      if (caption || dishAnalyses.length > 0) {
+        await supabase.from('ai_publish_insights').insert({
+          restaurant_id: id,
+          caption: caption,
+          dishes_data: dishAnalyses
+        });
+      }
+    }
+
+    return c.json({ success: true, id: postData?.id, status: postData?.status, post: postData });
+  } catch (err: any) {
+    console.error('Zernio publish error details:', err.message, err.stack);
+    return c.json({ error: err.message }, 500);
+  }
 });
 
 export default app;

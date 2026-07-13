@@ -7,6 +7,7 @@ import RecommendedDishesPage from './pages/RecommendedDishesPage';
 import TopPicksPage from './pages/TopPicksPage';
 import { useStore } from './store/useStore';
 import ErrorBoundary from './components/ErrorBoundary';
+import { ToastProvider } from './components/Toast';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const editMode = useStore((state) => state.editMode);
@@ -16,17 +17,19 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 export default function App() {
   return (
-    <HashRouter>
-      <Routes>
-        <Route element={<ErrorBoundary><MainLayout /></ErrorBoundary>}>
-          <Route path="/" element={<MapPage />} />
-          <Route path="/recommended" element={<RecommendedDishesPage />} />
-          <Route path="/top-picks" element={<TopPicksPage />} />
-          <Route path="/restaurant/new" element={<ProtectedRoute><RestaurantFormPage /></ProtectedRoute>} />
-          <Route path="/restaurant/:id/edit" element={<ProtectedRoute><RestaurantFormPage /></ProtectedRoute>} />
-          <Route path="/restaurant/:id" element={<RestaurantDetails />} />
-        </Route>
-      </Routes>
-    </HashRouter>
+    <ToastProvider>
+      <HashRouter>
+        <Routes>
+          <Route element={<ErrorBoundary><MainLayout /></ErrorBoundary>}>
+            <Route path="/" element={<MapPage />} />
+            <Route path="/recommended" element={<RecommendedDishesPage />} />
+            <Route path="/top-picks" element={<TopPicksPage />} />
+            <Route path="/restaurant/new" element={<ProtectedRoute><RestaurantFormPage /></ProtectedRoute>} />
+            <Route path="/restaurant/:id/edit" element={<ProtectedRoute><RestaurantFormPage /></ProtectedRoute>} />
+            <Route path="/restaurant/:id" element={<RestaurantDetails />} />
+          </Route>
+        </Routes>
+      </HashRouter>
+    </ToastProvider>
   );
 }

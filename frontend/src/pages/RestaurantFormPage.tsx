@@ -4,6 +4,7 @@ import L from 'leaflet';
 import { ArrowLeft, Loader2, LocateFixed } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useStore } from '../store/useStore';
+import NearbyPOIs from '../components/NearbyPOIs';
 
 const parseLatLngNumber = (raw: unknown): number | null => {
   if (typeof raw === 'number') {
@@ -150,9 +151,29 @@ export default function RestaurantFormPage() {
   const [error, setError] = useState<string | null>(null);
   const locationMapRef = useRef<HTMLDivElement | null>(null);
 
+  const fetchAddressForPin = async (position: L.LatLng) => {
+    setError(null);
+    setIsGeocoding(true);
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.lat}&lon=${position.lng}&zoom=18&addressdetails=1`);
+      if (!res.ok) throw new Error('Network request failed');
+      const data = await res.json();
+      if (data && data.display_name) {
+        setAddress(data.display_name);
+      } else {
+        setError('Could not get address for this pin.');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error retrieving address from pin');
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
   const setLatLngSafely = (
     value: { lat: unknown; lng: unknown } | L.LatLng | null,
-    invalidMessage = 'Invalid map coordinates received. Please try again.'
+    invalidMessage = 'Invalid map coordinates received. Please try again.',
+    autoFetchAddress = false
   ) => {
     if (value === null) {
       setLatLng(null);
@@ -166,6 +187,9 @@ export default function RestaurantFormPage() {
     }
     setError(null);
     setLatLng(normalized);
+    if (autoFetchAddress) {
+      void fetchAddressForPin(normalized);
+    }
   };
 
   const isBusy = loading || isSaving || isLocating || isGeocoding;
@@ -273,22 +297,7 @@ export default function RestaurantFormPage() {
       setError('Please drop a pin first.');
       return;
     }
-    setError(null);
-    setIsGeocoding(true);
-    try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latLng.lat}&lon=${latLng.lng}&zoom=18&addressdetails=1`);
-      if (!res.ok) throw new Error('Network request failed');
-      const data = await res.json();
-      if (data && data.display_name) {
-        setAddress(data.display_name);
-      } else {
-        setError('Could not get address for this pin.');
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error retrieving address from pin');
-    } finally {
-      setIsGeocoding(false);
-    }
+    await fetchAddressForPin(latLng);
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -318,14 +327,14 @@ export default function RestaurantFormPage() {
 
       const fallbackLocation = latLng ?? await getPreciseCurrentLocation().catch(() => L.latLng(18.9442, 72.8276));
 
-      const payload = {
+      const payload: any = {
         name: normalizedName,
-        notes: notes.trim() || undefined,
-        type: resolvedType || undefined,
-        cuisine: resolvedCuisine || undefined,
-        locationName: normalizeOneWord(locationName) || undefined,
-        address: address.trim() || undefined,
-        costForTwo: Number.isFinite(parsedCost) ? parsedCost : undefined,
+        notes: notes.trim() || null,
+        type: resolvedType || null,
+        cuisine: resolvedCuisine || null,
+        locationName: locationName.trim() || null,
+        address: address.trim() || null,
+        costForTwo: Number.isFinite(parsedCost) ? parsedCost : null,
         vegOnly,
         lat: fallbackLocation.lat,
         lng: fallbackLocation.lng
@@ -535,7 +544,8 @@ export default function RestaurantFormPage() {
                     className="h-full w-full"
                   >
                     <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
-                    <MapClickHandler onPick={(picked) => setLatLngSafely(picked)} />
+                    <NearbyPOIs />
+                    <MapClickHandler onPick={(picked) => setLatLngSafely(picked, undefined, true)} />
                     <MapUpdater center={initialMapCenter} />
                     {latLng && (
                       <Marker
@@ -545,7 +555,7 @@ export default function RestaurantFormPage() {
                           dragend: (event) => {
                             const marker = event.target;
                             const nextLatLng = marker.getLatLng();
-                            setLatLngSafely(nextLatLng);
+                            setLatLngSafely(nextLatLng, undefined, true);
                           }
                         }}
                       />
