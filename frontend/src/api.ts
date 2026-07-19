@@ -152,10 +152,13 @@ export const api = {
   publishToInstagram: (restaurantId: string, payload: { restaurantImageUrl: string, dishImageUrls: Record<string, string>, caption?: string, dishAnalyses?: any[] }) =>
     sendJSON<{ success: boolean; url?: string }>("POST", `/api/restaurants/${restaurantId}/publish-instagram`, payload),
 
+  publishTopPickToInstagram: (payload: { imageUrl: string, caption?: string }) =>
+    sendJSON<{ success: boolean; url?: string }>("POST", "/api/top-picks/publish-instagram", payload),
+
   getEvents: () => getJSON<any[]>("/api/events"),
   
-  analyzeRestaurantWithGemini: (restaurant: any, dishes: any[]) =>
-    sendJSON<{ caption: string, isCached?: boolean, dishes: { id: string, pros: string[], cons: string[], summary: string, verdict?: string }[] }>("POST", "/api/gemini/analyze-restaurant", { restaurant, dishes }),
+  analyzeRestaurantWithGemini: (restaurant: any, dishes: any[], forceRegenerate?: boolean) =>
+    sendJSON<{ caption: string, isCached?: boolean, dishes: { id: string, pros: string[], cons: string[], summary: string, verdict?: string }[] }>("POST", "/api/gemini/analyze-restaurant", { restaurant, dishes, forceRegenerate }),
 
   saveInsights: (restaurantId: string, caption: string, dishesData: any[]) =>
     sendJSON<{ success: boolean }>("POST", "/api/gemini/save-insights", { restaurantId, caption, dishesData }),

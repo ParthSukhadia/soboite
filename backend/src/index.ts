@@ -315,7 +315,7 @@ app.post('/api/gemini/analyze-restaurant', async (c) => {
   }
 
   try {
-    const { restaurant, dishes } = await c.req.json();
+    const { restaurant, dishes, forceRegenerate } = await c.req.json();
     const supabase = getSupabase(c);
 
     // CHECK DB FIRST
@@ -327,7 +327,7 @@ app.post('/api/gemini/analyze-restaurant', async (c) => {
       .limit(1)
       .single();
 
-    if (existingInsight && existingInsight.dishes_data && !insightError) {
+    if (!forceRegenerate && existingInsight && existingInsight.dishes_data && !insightError) {
       console.log("=== Found existing insights in DB, skipping Gemini ===");
       return c.json({
         caption: existingInsight.caption,
@@ -356,32 +356,35 @@ ${dishesInfo}
 
 First, for each dish, generate a short analysis (1-3 pros, 0-1 cons). Each point MUST be extremely concise (max 5-7 words).
 Second, generate a beautifully formatted Instagram caption for the entire restaurant.
-The caption MUST follow this exact structure (replace placeholders with actual data based on reviews).
-CRITICAL: You must include actual newline characters (\n) in the JSON string for the caption to preserve the line breaks. Do NOT put the text all on one line.
+
+CRITICAL FORMATTING INSTRUCTIONS FOR CAPTION:
+- You MUST use actual newline characters (\n) to preserve line breaks.
+- You MUST include a blank line (\n\n) between every single section of the caption so it looks clean and readable! Do NOT cram it all together.
+
+The caption MUST follow this exact structure (replace placeholders with actual data):
 
 [some emoji related to the dish or resto] [Catchy hook sentence related to the restaurant]
-
+\n\n
 📍 Restaurant:
 ${restaurant.name}, ${restaurant.locationName || 'Location'}
-
+\n\n
 🍽 Must Try:
 • [Dish 1] ⭐⭐⭐⭐⭐
 • [Dish 2] ⭐⭐⭐⭐☆
-(List 2-3 dishes based on ratings)
-
+\n\n
 ⭐ Overall Rating: [calculate overall out of 5 based on provided ratings]/5
 👥 Best For: [e.g. Date Night, Casual Dining, Family, etc. based on vibe]
-
+\n\n
 Review:
 [A 2-3 sentence engaging review of the restaurant combining thoughts from the dish reviews]
-
+\n\n
 ✅ Would I revisit?
 [Yes/No/Maybe with a short reason]
-
+\n\n
 👇 Have you been here? What should I try next?
-
+\n\n
 📌 Save this post for your next food outing.
-
+\n\n
 #Hashtags (generate 5 relevant hashtags)
 
 Return ONLY a JSON object containing 'dishes' (array of dish analysis) and 'caption' (the formatted string).
@@ -948,6 +951,62 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
     return c.json({ success: true, id: postData?.id, status: postData?.status, post: postData });
   } catch (err: any) {
     console.error('Zernio publish error details:', err.message, err.stack);
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Category/Top-Picks Publish Endpoint
+app.post('/api/top-picks/publish-instagram', async (c) => {
+  const supabase = getSupabase(c);
+
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch (e) {}
+
+  const imageUrl = body.imageUrl;
+  const caption = body.caption;
+
+  const zernioApiKey = (c.env as any).ZERNIO_API_KEY;
+  const zernioAccountId = (c.env as any).ZERNIO_ACCOUNT_ID;
+
+  if (!zernioApiKey || !zernioAccountId) {
+    return c.json({ error: `Missing Zernio credentials.` }, 400);
+  }
+
+  if (!imageUrl) {
+    return c.json({ error: 'No image provided' }, 400);
+  }
+
+  try {
+    const zernio = new Zernio({ apiKey: zernioApiKey });
+    const result = await zernio.posts.createPost({
+      body: {
+        content: caption || 'Check out our Top Picks!',
+        publishNow: true,
+        mediaItems: [{ url: imageUrl }],
+        platforms: [
+          {
+            platform: 'instagram',
+            accountId: zernioAccountId
+          }
+        ]
+      }
+    });
+
+    if (result.error) throw new Error(typeof result.error === 'string' ? result.error : JSON.stringify(result.error));
+    let postData = result.data as any;
+    
+    // Log event
+    await supabase.from('app_events').insert({
+      type: 'CATEGORY_PUBLISHED',
+      message: `A Top Picks category was published to Instagram!`,
+      link_url: `/`
+    });
+
+    return c.json({ success: true, id: postData?.id, status: postData?.status, post: postData });
+  } catch (err: any) {
+    console.error('Zernio publish error details:', err.message);
     return c.json({ error: err.message }, 500);
   }
 });

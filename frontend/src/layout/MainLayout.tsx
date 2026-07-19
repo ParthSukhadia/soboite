@@ -541,34 +541,7 @@ export default function MainLayout() {
               )}
             </button>
 
-            {showNotifications && (
-              <div className="absolute right-0 mt-2 w-80 rounded-2xl border border-gray-200 bg-white shadow-xl py-2 z-[3100] max-h-96 overflow-y-auto">
-                <div className="px-4 py-2 border-b border-gray-100">
-                  <h3 className="font-bold text-gray-800">Notifications</h3>
-                </div>
-                {mergedEvents.length === 0 ? (
-                  <div className="px-4 py-6 text-center text-sm text-gray-500">
-                    No recent events.
-                  </div>
-                ) : (
-                  <div className="flex flex-col">
-                    {mergedEvents.map((evt) => (
-                      <Link
-                        key={evt.id}
-                        to={evt.link_url || '#'}
-                        onClick={() => setShowNotifications(false)}
-                        className={`px-4 py-3 hover:bg-gray-50 border-b border-gray-50 last:border-0 transition-colors ${evt.id.startsWith('missing-') ? 'bg-amber-50/30' : ''}`}
-                      >
-                        <p className="text-sm font-medium text-gray-800 mb-1">{evt.message}</p>
-                        <p className="text-xs text-gray-400">
-                          {new Date(evt.created_at).toLocaleDateString()} {new Date(evt.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+
           </div>
           <button
             type="button"
@@ -691,6 +664,35 @@ export default function MainLayout() {
             )}
           </div>
         </div>
+
+        {showNotifications && (
+          <div className="absolute top-[calc(100%+0.25rem)] left-4 right-4 sm:left-auto sm:right-4 sm:w-80 rounded-2xl border border-gray-200 bg-white shadow-xl py-2 z-[3100] max-h-96 overflow-y-auto">
+            <div className="px-4 py-2 border-b border-gray-100">
+              <h3 className="font-bold text-gray-800">Notifications</h3>
+            </div>
+            {mergedEvents.length === 0 ? (
+              <div className="px-4 py-6 text-center text-sm text-gray-500">
+                No recent events.
+              </div>
+            ) : (
+              <div className="flex flex-col">
+                {mergedEvents.map((evt) => (
+                  <Link
+                    key={evt.id}
+                    to={evt.link_url || '#'}
+                    onClick={() => setShowNotifications(false)}
+                    className={`px-4 py-3 hover:bg-gray-50 border-b border-gray-50 last:border-0 transition-colors ${evt.id.startsWith('missing-') ? 'bg-amber-50/30' : ''}`}
+                  >
+                    <p className="text-sm font-medium text-gray-800 mb-1">{evt.message}</p>
+                    <p className="text-xs text-gray-400">
+                      {new Date(evt.created_at).toLocaleDateString()} {new Date(evt.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       {showMobileMenu && (

@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { Restaurant, TopPickCategory } from '../types';
-import { ChevronDown, ChevronRight, Plus, Edit2, Trash2, Loader2, Award, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Edit2, Trash2, Loader2, Award, X, Camera } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { motion, AnimatePresence } from 'framer-motion';
+
+import CategoryInstagramPreviewModal from '../components/CategoryInstagramPreviewModal';
 
 type ModalState = 
   | { type: 'add_category' }
@@ -25,6 +27,10 @@ export default function TopPicksPage() {
 
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [isSaving, setIsSaving] = useState(false);
+
+  
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewData, setPreviewData] = useState<{ category: TopPickCategory, restaurants: Restaurant[] } | null>(null);
   
   const [modal, setModal] = useState<ModalState>(null);
   const [inputValue, setInputValue] = useState('');
@@ -79,6 +85,20 @@ export default function TopPicksPage() {
     }
   };
 
+  const handleExportCategory = (category: TopPickCategory, categoryRests: Restaurant[]) => {
+    setPreviewData({ category, restaurants: categoryRests });
+    setPreviewModalOpen(true);
+  };
+
+  // Fun vibrant gradients for categories
+  const gradients = [
+    'from-pink-500 to-rose-500',
+    'from-purple-500 to-indigo-500',
+    'from-cyan-500 to-blue-500',
+    'from-emerald-400 to-teal-500',
+    'from-amber-400 to-orange-500',
+  ];
+
   return (
     <div className="h-full overflow-y-auto px-4 pb-24 pt-6 relative">
       {isSaving && (
@@ -88,6 +108,15 @@ export default function TopPicksPage() {
             <p className="text-sm font-semibold text-gray-700">Saving changes...</p>
           </div>
         </div>
+      )}
+
+      {previewData && (
+        <CategoryInstagramPreviewModal
+          isOpen={previewModalOpen}
+          onClose={() => setPreviewModalOpen(false)}
+          category={previewData.category}
+          restaurants={previewData.restaurants}
+        />
       )}
 
       <AnimatePresence>
@@ -191,9 +220,10 @@ export default function TopPicksPage() {
             No categories created yet. {editMode && "Click 'Add Category' to get started."}
           </div>
         ) : (
-          <div className="space-y-4">
-            {topPickCategories.map((category: TopPickCategory) => {
+          <div className="space-y-6">
+            {topPickCategories.map((category: TopPickCategory, index: number) => {
               const isExpanded = expandedCategories[category.id];
+              const gradient = gradients[index % gradients.length];
               const categoryRests = topPickRestaurants
                 .filter(tr => tr.category_id === category.id)
                 .sort((a, b) => a.position - b.position)
@@ -201,35 +231,55 @@ export default function TopPicksPage() {
                 .filter((r): r is Restaurant => Boolean(r));
 
               return (
-                <div key={category.id} className="rounded-3xl border border-gray-200 bg-white shadow-sm overflow-hidden transition-all duration-200">
+                <div key={category.id} className={`rounded-3xl border border-gray-100 bg-white shadow-xl shadow-gray-200/50 overflow-hidden transition-all duration-300 transform ${isExpanded ? 'scale-[1.01]' : 'hover:scale-[1.01]'}`}>
                   <div 
-                    className="flex cursor-pointer items-center justify-between bg-white p-4 hover:bg-gray-50 transition-colors"
+                    className={`relative overflow-hidden flex cursor-pointer items-center justify-between p-6 transition-colors ${isExpanded ? `bg-gradient-to-r ${gradient}` : 'bg-white hover:bg-gray-50'}`}
                     onClick={() => toggleCategory(category.id)}
                   >
-                    <div className="flex items-center gap-3">
-                      {isExpanded ? <ChevronDown className="h-5 w-5 text-gray-400" /> : <ChevronRight className="h-5 w-5 text-gray-400" />}
-                      <h2 className="text-xl font-bold">{category.name}</h2>
+                    {isExpanded && (
+                      <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] mix-blend-overlay"></div>
+                    )}
+                    {isExpanded && (
+                      <div className="absolute -top-12 -right-12 w-32 h-32 bg-white opacity-10 rounded-full blur-2xl"></div>
+                    )}
+                    
+                    <div className="flex items-center gap-4 relative z-10">
+                      <div className={`p-2 rounded-full ${isExpanded ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                        {isExpanded ? <ChevronDown className="h-6 w-6" /> : <ChevronRight className="h-6 w-6" />}
+                      </div>
+                      <h2 className={`text-2xl font-extrabold tracking-tight ${isExpanded ? 'text-white' : 'text-gray-900'}`}>{category.name}</h2>
                     </div>
                     {editMode && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 relative z-10">
                         <button
                           onClick={(e) => { e.stopPropagation(); setInputValue(category.name); setModal({ type: 'edit_category', categoryId: category.id, initialName: category.name }); }}
-                          className="rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                          className={`rounded-full p-2.5 transition-colors ${isExpanded ? 'text-white hover:bg-white/20' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-900'}`}
                         >
-                          <Edit2 className="h-4 w-4" />
+                          <Edit2 className="h-5 w-5" />
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); setModal({ type: 'delete_category', categoryId: category.id }); }}
-                          className="rounded-full p-2 text-red-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+                          className={`rounded-full p-2.5 transition-colors ${isExpanded ? 'text-white hover:bg-white/20' : 'text-red-400 hover:bg-red-50 hover:text-red-700'}`}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-5 w-5" />
                         </button>
                       </div>
                     )}
                   </div>
 
                   {isExpanded && (
-                    <div className="p-4 space-y-3 bg-gray-50 border-t border-gray-100">
+                    <div className="p-6 space-y-4 bg-gray-50/50">
+                      {categoryRests.length > 0 && (
+                        <div className="flex justify-end mb-2">
+                          <button
+                            onClick={() => handleExportCategory(category, categoryRests)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white shadow-lg transition-transform hover:scale-105 active:scale-95 bg-gradient-to-r ${gradient}`}
+                          >
+                            <Camera className="w-4 h-4" />
+                            Review & Publish
+                          </button>
+                        </div>
+                      )}
                       {categoryRests.length === 0 ? (
                         <div className="text-sm text-gray-500 pb-2">No restaurants added yet.</div>
                       ) : (

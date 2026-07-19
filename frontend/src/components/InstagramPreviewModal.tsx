@@ -37,9 +37,9 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
     }
   }, [isOpen]);
 
-  const fetchAnalysis = async () => {
+  const fetchAnalysis = async (forceRegenerate = false) => {
     try {
-      const analysisData = await api.analyzeRestaurantWithGemini(restaurant, dishes);
+      const analysisData = await api.analyzeRestaurantWithGemini(restaurant, dishes, forceRegenerate);
       if (analysisData.caption) {
         setCaptionText(analysisData.caption);
       }
@@ -185,10 +185,10 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl flex flex-col max-h-[90vh]">
-        <div className="p-4 border-b flex justify-between items-center">
-          <h2 className="text-xl font-bold">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 md:p-4">
+      <div className="bg-white md:rounded-lg shadow-xl w-full h-full md:h-auto md:max-w-5xl flex flex-col max-h-screen md:max-h-[90vh]">
+        <div className="p-4 border-b flex justify-between items-center bg-white md:rounded-t-lg shrink-0 z-10 shadow-sm md:shadow-none">
+          <h2 className="text-lg md:text-xl font-bold truncate pr-2">
             {step === 'loading' && 'Analyzing with Gemini...'}
             {step === 'review' && 'Step 1: Review Content'}
             {step === 'generating' && 'Generating Overlays...'}
@@ -217,15 +217,26 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
           )}
 
           {step === 'review' && (
-            <div className="flex-1 flex flex-col md:flex-row min-h-0">
-              <div className="w-full md:w-2/3 p-4 overflow-y-auto bg-gray-50 border-r border-gray-200">
-                <h3 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Review & Edit Dish Overlays</h3>
+            <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-y-hidden">
+              <div className="w-full md:w-2/3 p-4 md:overflow-y-auto bg-gray-50 md:border-r border-gray-200">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Review & Edit Dish Overlays</h3>
+                  <button 
+                    onClick={() => {
+                      setStep('loading');
+                      fetchAnalysis(true);
+                    }}
+                    className="text-xs bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded hover:bg-indigo-200 transition-colors flex items-center gap-1"
+                  >
+                    <span>🔄</span> Regenerate AI Content
+                  </button>
+                </div>
                 {isCached && (
                   <div className="mb-6 p-3 bg-blue-50 text-blue-800 rounded-lg flex items-start gap-2 border border-blue-200">
                     <span className="text-xl">✨</span>
                     <div>
-                      <p className="font-semibold text-sm">Data found in AI Insights DB</p>
-                      <p className="text-xs">Gemini AI generation was skipped because previously saved insights were found.</p>
+                      <p className="font-semibold text-sm">Data loaded from cache</p>
+                      <p className="text-xs">Click "Regenerate AI Content" to re-create the caption and insights from scratch.</p>
                     </div>
                   </div>
                 )}
@@ -252,7 +263,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                           <div>
                             <div className="flex justify-between items-center mb-2">
                               <span className="text-sm font-semibold text-green-600">Pros (Max 3)</span>
-                              <button onClick={() => addProCon(dish.id, 'pros')} disabled={analysis.pros.length >= 3} className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 disabled:opacity-50">
+                              <button onClick={() => addProCon(dish.id, 'pros')} disabled={analysis.pros.length >= 3} className="text-xs bg-green-100 text-green-700 px-3 py-1.5 md:px-2 md:py-1 rounded hover:bg-green-200 disabled:opacity-50 whitespace-nowrap">
                                 + Add Pro
                               </button>
                             </div>
@@ -276,7 +287,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                           <div>
                             <div className="flex justify-between items-center mb-2">
                               <span className="text-sm font-semibold text-red-600">Cons (Max 2)</span>
-                              <button onClick={() => addProCon(dish.id, 'cons')} disabled={analysis.cons.length >= 2} className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200 disabled:opacity-50">
+                              <button onClick={() => addProCon(dish.id, 'cons')} disabled={analysis.cons.length >= 2} className="text-xs bg-red-100 text-red-700 px-3 py-1.5 md:px-2 md:py-1 rounded hover:bg-red-200 disabled:opacity-50 whitespace-nowrap">
                                 + Add Con
                               </button>
                             </div>
@@ -335,7 +346,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                 </div>
               </div>
               
-              <div className="w-full md:w-1/3 p-4 flex flex-col bg-white">
+              <div className="w-full md:w-1/3 p-4 flex flex-col bg-white md:overflow-y-auto min-h-[400px] border-t md:border-t-0 border-gray-200 shrink-0">
                 <h3 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wider">Edit Overall Caption</h3>
                 <textarea
                   className="flex-1 w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none text-sm leading-relaxed"
@@ -348,8 +359,8 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
           )}
 
           {step === 'preview' && (
-            <div className="flex-1 flex flex-col md:flex-row min-h-0">
-              <div className="w-full md:w-2/3 p-4 overflow-y-auto bg-gray-100 border-r border-gray-200">
+            <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-y-hidden">
+              <div className="w-full md:w-2/3 p-4 md:overflow-y-auto bg-gray-100 md:border-r border-gray-200">
                 <h3 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Photo Previews</h3>
                 {previews.length === 0 ? (
                   <div className="text-center text-gray-500 py-12">No images available for publishing.</div>
@@ -365,7 +376,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                 )}
               </div>
               
-              <div className="w-full md:w-1/3 p-4 flex flex-col min-h-[300px] bg-white">
+              <div className="w-full md:w-1/3 p-4 flex flex-col min-h-[400px] bg-white md:overflow-y-auto border-t md:border-t-0 border-gray-200 shrink-0">
                 <h3 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wider flex justify-between items-center">
                   <span>Caption</span>
                   <button
@@ -387,18 +398,18 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
           )}
         </div>
 
-        <div className="p-4 border-t flex justify-end bg-gray-50 gap-4">
+        <div className="p-4 border-t flex flex-wrap justify-end bg-gray-50 gap-2 sm:gap-4 shrink-0 shadow-[0_-2px_10px_rgba(0,0,0,0.05)] md:shadow-none">
           {step === 'review' && (
             <>
               <button
                 onClick={onClose}
-                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-medium transition-colors"
+                className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-medium transition-colors text-sm sm:text-base text-center"
               >
                 Cancel
               </button>
               <button
                 onClick={generateImages}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition-colors"
+                className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition-colors text-sm sm:text-base whitespace-nowrap text-center"
               >
                 Generate Images &rarr;
               </button>
@@ -406,17 +417,17 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
           )}
 
           {step === 'preview' && (
-            <>
+            <div className="w-full flex flex-wrap justify-end gap-2 sm:gap-4 items-center">
               <button
                 onClick={() => setStep('review')}
-                className="mr-auto px-4 py-2 text-indigo-600 hover:text-indigo-800 font-medium transition-colors flex items-center"
+                className="mr-auto px-4 py-2 text-indigo-600 hover:text-indigo-800 font-medium transition-colors flex items-center justify-center border border-indigo-600 rounded-lg sm:border-0 sm:justify-start"
               >
                 &larr; Back to Edit
               </button>
               <button
                 onClick={handleDownloadAll}
                 disabled={previews.length === 0}
-                className="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow hover:bg-green-700 disabled:opacity-50 transition-colors"
+                className="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow hover:bg-green-700 disabled:opacity-50 transition-colors text-sm sm:text-base text-center"
               >
                 Download All Photos
               </button>
@@ -452,11 +463,11 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                   }
                 }}
                 disabled={isPublishing || previews.length === 0}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium transition-colors"
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium transition-colors text-sm sm:text-base text-center"
               >
                 {isPublishing ? 'Publishing...' : 'Approve & Publish'}
               </button>
-            </>
+            </div>
           )}
         </div>
       </div>

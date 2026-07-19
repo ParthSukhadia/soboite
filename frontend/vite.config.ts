@@ -8,6 +8,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  define: {
+    'process.env': {}
+  },
   server: {
     port: 5175,
     host: '0.0.0.0', // Set to 0.0.0.0 to bind to all local IPs so you can access it via your phone.
