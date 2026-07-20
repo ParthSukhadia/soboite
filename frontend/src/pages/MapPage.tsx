@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMapEvents, use
 import { useStore } from '../store/useStore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, X, Star, Utensils, SlidersHorizontal, RotateCcw, ImagePlus, Loader2, Smile, Mic, Square, FileText } from 'lucide-react';
+import { Plus, X, Star, Utensils, SlidersHorizontal, RotateCcw, ImagePlus, Loader2, Smile, FileText, PartyPopper, Crown, Sparkles, Trophy } from 'lucide-react';
 import L from 'leaflet';
 import { Restaurant } from '../types';
 import { optimizeImage } from '../lib/imageOptimization';
@@ -264,13 +264,10 @@ export default function MapPage() {
     dishLikes
   } = useStore();
   const [showAddForm, setShowAddForm] = useState(false);
-  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
+  const [showStatsPopup, setShowStatsPopup] = useState(false);
   const [showTextImport, setShowTextImport] = useState(false);
   const [textImportContent, setTextImportContent] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const [latLng, setLatLng] = useState<PinLatLng | null>(null);
+        const [latLng, setLatLng] = useState<PinLatLng | null>(null);
   const [currentPosition, setCurrentPosition] = useState<L.LatLng | null>(null);
   const [addStep, setAddStep] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
@@ -586,98 +583,6 @@ export default function MapPage() {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   };
 
-  const startRecording = async () => {
-    setAddFormError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const formData = new FormData();
-        formData.append('audio', audioBlob, 'voice-memo.webm');
-        
-        setIsRecording(false);
-        setNetworkBusy(true);
-        try {
-          const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
-          const response = await fetch(`${baseUrl}/api/voice-import`, {
-            method: 'POST',
-            body: formData,
-          });
-          
-          if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            throw new Error(errData.error || 'Voice processing failed');
-          }
-          
-          const data = await response.json();
-          
-          if (data.name) {
-            setNewRestName(data.name);
-            sessionStorage.setItem('draft_restName', data.name);
-          }
-          if (data.address) {
-            setNewRestAddress(data.address);
-            sessionStorage.setItem('draft_restAddress', data.address);
-          }
-          if (data.lat && data.lng) {
-            setLatLng({ lat: data.lat, lng: data.lng });
-          }
-          
-          if (data.dishes && data.dishes.length > 0) {
-            setDishPhotos(data.dishes.map((d: any) => ({
-              id: createId(),
-              imageStorageUrl: '',
-              photoPosition: { x: 50, y: 50 },
-              photoZoom: 1,
-              name: d.name || '',
-              rating: d.rating || 5,
-              priceLevel: d.priceLevel || 2,
-              actualPrice: '',
-              review: d.review || '',
-              reviewDate: new Date().toISOString().slice(0, 10),
-              cuisine: '',
-              flavorTags: [],
-              isCustomCuisine: false
-            })));
-            setShowDishBuilder(true);
-          }
-          
-          setShowVoiceRecorder(false);
-          setAddStep(2);
-        } catch (error: any) {
-          console.error(error);
-          setAddFormError(error.message || 'Failed to process voice memo.');
-        } finally {
-          setNetworkBusy(false);
-        }
-        
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error('Error accessing microphone:', err);
-      setAddFormError('Microphone access denied or unavailable.');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-    }
-  };
-
   const startTextImport = async () => {
     if (!textImportContent.trim()) {
       setAddFormError('Please enter some text to import.');
@@ -791,7 +696,6 @@ export default function MapPage() {
   const openAddForm = () => {
     setShowAddForm(true);
     setAddStep(1);
-    setShowVoiceRecorder(false);
     setShowTextImport(false);
   };
 
@@ -2199,7 +2103,80 @@ export default function MapPage() {
         </div>
       )}
 
-      {/* Floating Add Button */}
+      
+
+      {/* Restaurant Count Layover */}
+      {!showAddForm && (
+        <motion.button 
+          onClick={() => setShowStatsPopup(true)}
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          className="absolute left-6 z-[1000] bg-white text-gray-800 rounded-full py-1.5 px-3 shadow-lg flex items-center gap-1.5 font-bold text-xs border border-gray-200"
+          style={{ bottom: displayRestaurants.length > 0 ? 'calc(28vh + 16px)' : 'calc(16px + env(safe-area-inset-bottom))' }}
+        >
+          <PartyPopper size={14} className="text-rose-500 animate-bounce" />
+          <span>{restaurants.length} Places</span>
+        </motion.button>
+      )}
+
+      {/* Stats Popup */}
+      <AnimatePresence>
+        {showStatsPopup && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 20, transition: { duration: 0.2 } }}
+            className="absolute left-6 z-[1100] bg-white rounded-2xl shadow-xl border border-gray-100 p-4 w-56 origin-bottom-left"
+            style={{ bottom: displayRestaurants.length > 0 ? 'calc(28vh + 56px)' : 'calc(56px + env(safe-area-inset-bottom))' }}
+          >
+            <div className="relative z-10">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center gap-2">
+                  <Crown size={16} className="text-amber-500" />
+                  <h3 className="font-bold text-gray-900 text-sm">
+                    App Milestones
+                  </h3>
+                </div>
+                <button 
+                  onClick={() => setShowStatsPopup(false)} 
+                  className="bg-gray-100 hover:bg-gray-200 p-1.5 rounded-full text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {[
+                  { label: "Total Dishes", value: dishes.length, icon: Utensils, color: "text-blue-500", bg: "bg-blue-50" },
+                  { label: "Cuisines", value: cuisines.length, icon: Sparkles, color: "text-emerald-500", bg: "bg-emerald-50" },
+                  { label: "Categories", value: restaurantTypes.length, icon: Trophy, color: "text-purple-500", bg: "bg-purple-50" },
+                ].map((stat, i) => (
+                  <motion.div 
+                    key={stat.label}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 + (i * 0.1), type: "spring", stiffness: 100 }}
+                    className="flex justify-between items-center p-2.5 rounded-xl bg-white border border-gray-100 shadow-sm"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className={`p-1.5 rounded-lg ${stat.bg} ${stat.color}`}>
+                        <stat.icon size={14} />
+                      </div>
+                      <span className="font-medium text-gray-600 text-xs">{stat.label}</span>
+                    </div>
+                    <span className="font-bold text-sm text-gray-800">
+                      {stat.value}
+                    </span>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+{/* Floating Add Button */}
       {editMode && !showAddForm && (
         <button 
           onClick={openAddForm}
@@ -2228,44 +2205,7 @@ export default function MapPage() {
               <h2 className="text-xl font-bold">Add Restaurant</h2>
               <button disabled={isApiBusy} onClick={closeAddForm} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"><X size={20} /></button>
             </div>
-            {showVoiceRecorder ? (
-              <div className="flex flex-col items-center justify-center py-12 space-y-6">
-                <div className="text-center space-y-2">
-                  <h3 className="text-lg font-bold">Voice Import</h3>
-                  <p className="text-sm text-gray-500 max-w-[250px]">
-                    Describe the restaurant, location, price, rating, and any dishes you had.
-                  </p>
-                </div>
-                
-                <button
-                  type="button"
-                  onClick={isRecording ? stopRecording : startRecording}
-                  className={`w-24 h-24 rounded-full flex items-center justify-center transition-all ${
-                    isRecording 
-                      ? 'bg-red-50 text-red-500 animate-pulse shadow-[0_0_0_8px_rgba(239,68,68,0.2)]' 
-                      : 'bg-black text-white hover:scale-105'
-                  }`}
-                >
-                  {isRecording ? <Square fill="currentColor" size={32} /> : <Mic size={32} />}
-                </button>
-                
-                <div className="text-sm font-medium text-gray-600 h-6">
-                  {isRecording ? 'Recording... Tap to stop' : 'Tap to start recording'}
-                </div>
-
-                {addFormError && (
-                  <p className="text-sm text-red-600 font-medium px-4 text-center">{addFormError}</p>
-                )}
-                
-                <button
-                  type="button"
-                  onClick={() => setShowVoiceRecorder(false)}
-                  className="mt-8 text-sm font-semibold text-gray-500 hover:text-black"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : showTextImport ? (
+            {showTextImport ? (
               <div className="flex flex-col py-6 space-y-4">
                 <div className="text-center space-y-2">
                   <h3 className="text-lg font-bold">Text Import</h3>
@@ -2310,15 +2250,8 @@ export default function MapPage() {
                 <div className="flex gap-2 mb-6">
                   <button
                     type="button"
-                    onClick={() => setShowVoiceRecorder(true)}
-                    className="flex-1 bg-red-50 text-red-600 font-bold py-3 rounded-xl border border-red-200 hover:bg-red-100 flex items-center justify-center gap-2 shadow-sm text-sm"
-                  >
-                    <Mic size={18} /> Voice Import
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setShowTextImport(true)}
-                    className="flex-1 bg-blue-50 text-blue-600 font-bold py-3 rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center justify-center gap-2 shadow-sm text-sm"
+                    className="w-full bg-blue-50 text-blue-600 font-bold py-3 rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center justify-center gap-2 shadow-sm text-sm"
                   >
                     <FileText size={18} /> Text Import
                   </button>
@@ -2543,6 +2476,7 @@ export default function MapPage() {
                         />
                       )}
                     </MapContainer>
+
                   </div>
 
                   {!validPinLatLng ? (
