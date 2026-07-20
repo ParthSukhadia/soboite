@@ -1,13 +1,22 @@
 // backend/src/index.ts
 import { Hono } from 'hono'
-import { logger } from 'hono/logger'
 import { cors } from 'hono/cors'
 import { createSupabaseClient } from '../lib/supabase'
 import { Zernio } from '@zernio/node'
 import { GoogleGenAI, Type } from '@google/genai'
-
 const app = new Hono()
-app.use('*', logger())
+
+app.use('*', async (c, next) => {
+  await next()
+  if (c.res.status === 500) {
+    const res = c.res.clone()
+    let errorDetail = ''
+    try {
+      errorDetail = await res.text()
+    } catch(e) {}
+    console.error(`[500 ERROR] ${c.req.method} ${c.req.url} -`, errorDetail)
+  }
+})
 const getSupabase = (c: any) => createSupabaseClient(c.env)
 
 const normalizeRequestBody = (body: any) => {
@@ -43,7 +52,6 @@ app.get('/api/events', async (c) => {
 app.get('/api/restaurants', async (c) => {
   const supabase = getSupabase(c)
   const { data, error } = await supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, like_count')
-  console.log('[SUPABASE RESTAURANTS RESP]', { error, dataLength: data?.length, dataPreview: data?.slice(0, 2) });
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data);
 })
@@ -52,7 +60,6 @@ app.get('/api/restaurants', async (c) => {
 app.get('/api/dishes', async (c) => {
   const supabase = getSupabase(c)
   const { data, error } = await supabase.from('dishes_with_likes').select('id, name, restaurant_id, rating, price_level, actual_price, serves, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, like_count')
-  console.log('[SUPABASE DISHES RESP]', { error, dataLength: data?.length, dataPreview: data?.slice(0, 2) });
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data);
 })
@@ -539,7 +546,7 @@ app.get('/api/users/:device_id/likes', async (c) => {
     .from('users')
     .select('id')
     .eq('device_id', deviceId)
-    .single();
+    .maybeSingle();
 
   if (userError || !user) return c.json({ error: userError?.message || 'User not found' }, 404);
 
@@ -574,7 +581,7 @@ app.post('/api/restaurants/:id/like', async (c) => {
     .from('users')
     .select('id')
     .eq('device_id', deviceId)
-    .single();
+    .maybeSingle();
 
   if (userError || !user) return c.json({ error: 'User not found' }, 404);
 
@@ -608,7 +615,7 @@ app.post('/api/dishes/:id/like', async (c) => {
     .from('users')
     .select('id')
     .eq('device_id', deviceId)
-    .single();
+    .maybeSingle();
 
   if (userError || !user) return c.json({ error: 'User not found' }, 404);
 
@@ -876,8 +883,6 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
       }
     });
 
-    console.log("Zernio createPost response:", JSON.stringify(result, null, 2));
-
     if (result.error) {
       throw new Error(typeof result.error === 'string' ? result.error : JSON.stringify(result.error));
     }
@@ -886,7 +891,6 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
     const postId = postData?.id;
 
     if (postId) {
-      console.log(`Post created successfully. Polling for status on post ${postId}...`);
       // Poll up to 12 times, 5 seconds apart (total 60 seconds max)
       for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
@@ -899,11 +903,9 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
         }
 
         postData = statusRes.data as any;
-        console.log(`Poll ${i + 1}/12: Post ${postId} status is '${postData?.status}'`);
 
         // Check if the post reached a terminal state
         if (['published', 'failed', 'partial', 'cancelled'].includes(postData?.status)) {
-          console.log(`Post ${postId} reached terminal status: ${postData?.status}`);
           break;
         }
       }

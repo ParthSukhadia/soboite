@@ -28,7 +28,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// .wrangler/tmp/bundle-uDIfNu/checked-fetch.js
+// .wrangler/tmp/bundle-22FU7M/checked-fetch.js
 function checkURL(request, init) {
   const url = request instanceof URL ? request : new URL(
     (typeof request === "string" ? new Request(request, init) : request).url
@@ -46,7 +46,7 @@ function checkURL(request, init) {
 }
 var urls;
 var init_checked_fetch = __esm({
-  ".wrangler/tmp/bundle-uDIfNu/checked-fetch.js"() {
+  ".wrangler/tmp/bundle-22FU7M/checked-fetch.js"() {
     "use strict";
     urls = /* @__PURE__ */ new Set();
     __name(checkURL, "checkURL");
@@ -394,11 +394,11 @@ var require_p_retry = __commonJS({
   }
 });
 
-// .wrangler/tmp/bundle-uDIfNu/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-22FU7M/middleware-loader.entry.ts
 init_checked_fetch();
 init_modules_watch_stub();
 
-// .wrangler/tmp/bundle-uDIfNu/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-22FU7M/middleware-insertion-facade.js
 init_checked_fetch();
 init_modules_watch_stub();
 
@@ -2592,78 +2592,6 @@ var Hono2 = class extends Hono {
     });
   }
 };
-
-// node_modules/hono/dist/middleware/logger/index.js
-init_checked_fetch();
-init_modules_watch_stub();
-
-// node_modules/hono/dist/utils/color.js
-init_checked_fetch();
-init_modules_watch_stub();
-function getColorEnabled() {
-  const { process: process2, Deno: Deno2 } = globalThis;
-  const isNoColor = typeof Deno2?.noColor === "boolean" ? Deno2.noColor : process2 !== void 0 ? (
-    // eslint-disable-next-line no-unsafe-optional-chaining
-    "NO_COLOR" in process2?.env
-  ) : false;
-  return !isNoColor;
-}
-__name(getColorEnabled, "getColorEnabled");
-async function getColorEnabledAsync() {
-  const { navigator: navigator2 } = globalThis;
-  const cfWorkers = "cloudflare:workers";
-  const isNoColor = navigator2 !== void 0 && navigator2.userAgent === "Cloudflare-Workers" ? await (async () => {
-    try {
-      return "NO_COLOR" in ((await import(cfWorkers)).env ?? {});
-    } catch {
-      return false;
-    }
-  })() : !getColorEnabled();
-  return !isNoColor;
-}
-__name(getColorEnabledAsync, "getColorEnabledAsync");
-
-// node_modules/hono/dist/middleware/logger/index.js
-var humanize = /* @__PURE__ */ __name((times) => {
-  const [delimiter, separator] = [",", "."];
-  const orderTimes = times.map((v) => v.replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1" + delimiter));
-  return orderTimes.join(separator);
-}, "humanize");
-var time = /* @__PURE__ */ __name((start) => {
-  const delta = Date.now() - start;
-  return humanize([delta < 1e3 ? delta + "ms" : Math.round(delta / 1e3) + "s"]);
-}, "time");
-var colorStatus = /* @__PURE__ */ __name(async (status) => {
-  const colorEnabled = await getColorEnabledAsync();
-  if (colorEnabled) {
-    switch (status / 100 | 0) {
-      case 5:
-        return `\x1B[31m${status}\x1B[0m`;
-      case 4:
-        return `\x1B[33m${status}\x1B[0m`;
-      case 3:
-        return `\x1B[36m${status}\x1B[0m`;
-      case 2:
-        return `\x1B[32m${status}\x1B[0m`;
-    }
-  }
-  return `${status}`;
-}, "colorStatus");
-async function log(fn, prefix, method, path, status = 0, elapsed) {
-  const out = prefix === "<--" ? `${prefix} ${method} ${path}` : `${prefix} ${method} ${path} ${await colorStatus(status)} ${elapsed}`;
-  fn(out);
-}
-__name(log, "log");
-var logger = /* @__PURE__ */ __name((fn = console.log) => {
-  return /* @__PURE__ */ __name(async function logger2(c, next) {
-    const { method, url } = c.req;
-    const path = url.slice(url.indexOf("/", 8));
-    await log(fn, "<--", method, path);
-    const start = Date.now();
-    await next();
-    await log(fn, "-->", method, path, c.res.status, time(start));
-  }, "logger2");
-}, "logger");
 
 // node_modules/hono/dist/middleware/cors/index.js
 init_checked_fetch();
@@ -16085,9 +16013,9 @@ function decodeJWT(token) {
   return data;
 }
 __name(decodeJWT, "decodeJWT");
-async function sleep2(time2) {
+async function sleep2(time) {
   return await new Promise((accept) => {
-    setTimeout(() => accept(null), time2);
+    setTimeout(() => accept(null), time);
   });
 }
 __name(sleep2, "sleep");
@@ -44593,81 +44521,81 @@ var ClientSDK = class {
 };
 var jsonLikeContentTypeRE = /^(application|text)\/([^+]+\+)*json.*/;
 var jsonlLikeContentTypeRE = /^(application|text)\/([^+]+\+)*(jsonl|x-ndjson)\b.*/;
-async function logRequest(logger2, req) {
-  if (!logger2) {
+async function logRequest(logger, req) {
+  if (!logger) {
     return;
   }
   const contentType = req.headers.get("content-type");
   const ct = (contentType === null || contentType === void 0 ? void 0 : contentType.split(";")[0]) || "";
-  logger2.group(`> Request: ${req.method} ${req.url}`);
-  logger2.group("Headers:");
+  logger.group(`> Request: ${req.method} ${req.url}`);
+  logger.group("Headers:");
   for (const [k2, v] of req.headers.entries()) {
-    logger2.log(`${k2}: ${v}`);
+    logger.log(`${k2}: ${v}`);
   }
-  logger2.groupEnd();
-  logger2.group("Body:");
+  logger.groupEnd();
+  logger.group("Body:");
   switch (true) {
     case jsonLikeContentTypeRE.test(ct):
-      logger2.log(await req.clone().json());
+      logger.log(await req.clone().json());
       break;
     case ct.startsWith("text/"):
-      logger2.log(await req.clone().text());
+      logger.log(await req.clone().text());
       break;
     case ct === "multipart/form-data": {
       const body = await req.clone().formData();
       for (const [k2, v] of body) {
         const vlabel = v instanceof Blob ? "<Blob>" : v;
-        logger2.log(`${k2}: ${vlabel}`);
+        logger.log(`${k2}: ${vlabel}`);
       }
       break;
     }
     default:
-      logger2.log(`<${contentType}>`);
+      logger.log(`<${contentType}>`);
       break;
   }
-  logger2.groupEnd();
-  logger2.groupEnd();
+  logger.groupEnd();
+  logger.groupEnd();
 }
 __name(logRequest, "logRequest");
-async function logResponse(logger2, res, req) {
-  if (!logger2) {
+async function logResponse(logger, res, req) {
+  if (!logger) {
     return;
   }
   const contentType = res.headers.get("content-type");
   const ct = (contentType === null || contentType === void 0 ? void 0 : contentType.split(";")[0]) || "";
-  logger2.group(`< Response: ${req.method} ${req.url}`);
-  logger2.log("Status Code:", res.status, res.statusText);
-  logger2.group("Headers:");
+  logger.group(`< Response: ${req.method} ${req.url}`);
+  logger.log("Status Code:", res.status, res.statusText);
+  logger.group("Headers:");
   for (const [k2, v] of res.headers.entries()) {
-    logger2.log(`${k2}: ${v}`);
+    logger.log(`${k2}: ${v}`);
   }
-  logger2.groupEnd();
-  logger2.group("Body:");
+  logger.groupEnd();
+  logger.group("Body:");
   switch (true) {
     case (matchContentType(res, "application/json") || jsonLikeContentTypeRE.test(ct) && !jsonlLikeContentTypeRE.test(ct)):
-      logger2.log(await res.clone().json());
+      logger.log(await res.clone().json());
       break;
     case (matchContentType(res, "application/jsonl") || jsonlLikeContentTypeRE.test(ct)):
     case matchContentType(res, "text/event-stream"):
-      logger2.log(`<${contentType}>`);
+      logger.log(`<${contentType}>`);
       break;
     case matchContentType(res, "text/*"):
-      logger2.log(await res.clone().text());
+      logger.log(await res.clone().text());
       break;
     case matchContentType(res, "multipart/form-data"): {
       const body = await res.clone().formData();
       for (const [k2, v] of body) {
         const vlabel = v instanceof Blob ? "<Blob>" : v;
-        logger2.log(`${k2}: ${vlabel}`);
+        logger.log(`${k2}: ${vlabel}`);
       }
       break;
     }
     default:
-      logger2.log(`<${contentType}>`);
+      logger.log(`<${contentType}>`);
       break;
   }
-  logger2.groupEnd();
-  logger2.groupEnd();
+  logger.groupEnd();
+  logger.groupEnd();
 }
 __name(logResponse, "logResponse");
 var GoogleGenAiDefaultError = class extends GoogleGenAiError {
@@ -49058,7 +48986,18 @@ var GoogleGenAI2 = class {
 
 // src/index.ts
 var app = new Hono2();
-app.use("*", logger());
+app.use("*", async (c, next) => {
+  await next();
+  if (c.res.status === 500) {
+    const res = c.res.clone();
+    let errorDetail = "";
+    try {
+      errorDetail = await res.text();
+    } catch (e) {
+    }
+    console.error(`[500 ERROR] ${c.req.method} ${c.req.url} -`, errorDetail);
+  }
+});
 var getSupabase = /* @__PURE__ */ __name((c) => createSupabaseClient(c.env), "getSupabase");
 var normalizeRequestBody = /* @__PURE__ */ __name((body) => {
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
@@ -49084,14 +49023,12 @@ app.get("/api/events", async (c) => {
 app.get("/api/restaurants", async (c) => {
   const supabase = getSupabase(c);
   const { data, error } = await supabase.from("restaurants_with_likes").select("id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, like_count");
-  console.log("[SUPABASE RESTAURANTS RESP]", { error, dataLength: data?.length, dataPreview: data?.slice(0, 2) });
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
 });
 app.get("/api/dishes", async (c) => {
   const supabase = getSupabase(c);
   const { data, error } = await supabase.from("dishes_with_likes").select("id, name, restaurant_id, rating, price_level, actual_price, serves, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, like_count");
-  console.log("[SUPABASE DISHES RESP]", { error, dataLength: data?.length, dataPreview: data?.slice(0, 2) });
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
 });
@@ -49489,7 +49426,7 @@ app.post("/api/users", async (c) => {
 app.get("/api/users/:device_id/likes", async (c) => {
   const supabase = getSupabase(c);
   const deviceId = c.req.param("device_id");
-  const { data: user, error: userError } = await supabase.from("users").select("id").eq("device_id", deviceId).single();
+  const { data: user, error: userError } = await supabase.from("users").select("id").eq("device_id", deviceId).maybeSingle();
   if (userError || !user) return c.json({ error: userError?.message || "User not found" }, 404);
   const { data: restLikes, error: restError } = await supabase.from("restaurant_likes").select("restaurant_id, is_like").eq("user_id", user.id);
   if (restError) return c.json({ error: restError.message }, 500);
@@ -49505,7 +49442,7 @@ app.post("/api/restaurants/:id/like", async (c) => {
   const restaurantId = c.req.param("id");
   const { deviceId, isLike } = await c.req.json();
   if (!deviceId || typeof isLike !== "boolean" && isLike !== null) return c.json({ error: "Missing fields" }, 400);
-  const { data: user, error: userError } = await supabase.from("users").select("id").eq("device_id", deviceId).single();
+  const { data: user, error: userError } = await supabase.from("users").select("id").eq("device_id", deviceId).maybeSingle();
   if (userError || !user) return c.json({ error: "User not found" }, 404);
   if (isLike === null) {
     const { error: error2 } = await supabase.from("restaurant_likes").delete().match({ user_id: user.id, restaurant_id: restaurantId });
@@ -49524,7 +49461,7 @@ app.post("/api/dishes/:id/like", async (c) => {
   const dishId = c.req.param("id");
   const { deviceId, isLike } = await c.req.json();
   if (!deviceId || typeof isLike !== "boolean" && isLike !== null) return c.json({ error: "Missing fields" }, 400);
-  const { data: user, error: userError } = await supabase.from("users").select("id").eq("device_id", deviceId).single();
+  const { data: user, error: userError } = await supabase.from("users").select("id").eq("device_id", deviceId).maybeSingle();
   if (userError || !user) return c.json({ error: "User not found" }, 404);
   if (isLike === null) {
     const { error: error2 } = await supabase.from("dish_likes").delete().match({ user_id: user.id, dish_id: dishId });
@@ -49737,14 +49674,12 @@ ${restaurant.notes}` : "";
         ]
       }
     });
-    console.log("Zernio createPost response:", JSON.stringify(result, null, 2));
     if (result.error) {
       throw new Error(typeof result.error === "string" ? result.error : JSON.stringify(result.error));
     }
     let postData = result.data;
     const postId = postData?.id;
     if (postId) {
-      console.log(`Post created successfully. Polling for status on post ${postId}...`);
       for (let i = 0; i < 12; i++) {
         await new Promise((resolve) => setTimeout(resolve, 5e3));
         const statusRes = await zernio.posts.getPost({ path: { postId } });
@@ -49753,9 +49688,7 @@ ${restaurant.notes}` : "";
           break;
         }
         postData = statusRes.data;
-        console.log(`Poll ${i + 1}/12: Post ${postId} status is '${postData?.status}'`);
         if (["published", "failed", "partial", "cancelled"].includes(postData?.status)) {
-          console.log(`Post ${postId} reached terminal status: ${postData?.status}`);
           break;
         }
       }
@@ -49889,7 +49822,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env2, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-uDIfNu/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-22FU7M/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -49923,7 +49856,7 @@ function __facade_invoke__(request, env2, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-uDIfNu/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-22FU7M/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

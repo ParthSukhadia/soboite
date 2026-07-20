@@ -20,6 +20,9 @@ async function getJSON<T>(path: string): Promise<T> {
   });
   if (!resp.ok) {
     const text = await resp.text();
+    if (resp.status === 500) {
+      console.error(`[500 ERROR] Frontend API GET ${path} failed:`, text);
+    }
     throw new Error(`API GET ${path} failed (${resp.status}): ${text}`);
   }
   return (await resp.json()) as T;
@@ -36,6 +39,9 @@ async function sendJSON<T>(method: string, path: string, body: any): Promise<T> 
   });
   if (!resp.ok) {
     const text = await resp.text();
+    if (resp.status === 500) {
+      console.error(`[500 ERROR] Frontend API ${method} ${path} failed:`, text);
+    }
     throw new Error(`API ${method} ${path} failed (${resp.status}): ${text}`);
   }
   return (await resp.json()) as T;
@@ -116,7 +122,11 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
     });
-    if (!res.ok) throw new Error('Failed to create top pick category');
+    if (!res.ok) {
+      const text = await res.text();
+      if (res.status === 500) console.error(`[500 ERROR] Frontend API POST /api/top-picks/categories failed:`, text);
+      throw new Error(`Failed to create top pick category: ${text}`);
+    }
     return res.json();
   },
 
@@ -126,13 +136,21 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
     });
-    if (!res.ok) throw new Error('Failed to update top pick category');
+    if (!res.ok) {
+      const text = await res.text();
+      if (res.status === 500) console.error(`[500 ERROR] Frontend API PUT /api/top-picks/categories/${id} failed:`, text);
+      throw new Error(`Failed to update top pick category: ${text}`);
+    }
     return res.json();
   },
 
   async deleteTopPickCategory(id: string) {
     const res = await fetch(`${apiBase}/api/top-picks/categories/${id}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Failed to delete top pick category');
+    if (!res.ok) {
+      const text = await res.text();
+      if (res.status === 500) console.error(`[500 ERROR] Frontend API DELETE /api/top-picks/categories/${id} failed:`, text);
+      throw new Error(`Failed to delete top pick category: ${text}`);
+    }
     return res.json();
   },
 
@@ -142,7 +160,11 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ restaurantIds })
     });
-    if (!res.ok) throw new Error('Failed to update top pick restaurants');
+    if (!res.ok) {
+      const text = await res.text();
+      if (res.status === 500) console.error(`[500 ERROR] Frontend API POST /api/top-picks/categories/${categoryId}/restaurants failed:`, text);
+      throw new Error(`Failed to update top pick restaurants: ${text}`);
+    }
     return res.json();
   },
 

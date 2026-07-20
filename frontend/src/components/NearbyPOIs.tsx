@@ -64,8 +64,6 @@ export default function NearbyPOIs() {
           }))
           .filter((el: any) => el.name.trim() !== '' && el.lat && el.lng);
           
-        console.log('Overpass API returned', data.elements.length, 'elements');
-        console.log('Filtered to', results.length, 'POIs:', results);
         setPois(results);
       } catch (e: any) {
         if (e.name !== 'AbortError') {
