@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMapEvents, use
 import { useStore } from '../store/useStore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, X, Star, Utensils, SlidersHorizontal, RotateCcw, ImagePlus, Loader2, Smile } from 'lucide-react';
+import { Plus, X, Star, Utensils, SlidersHorizontal, RotateCcw, ImagePlus, Loader2, Smile, Mic, Square, FileText } from 'lucide-react';
 import L from 'leaflet';
 import { Restaurant } from '../types';
 import { optimizeImage } from '../lib/imageOptimization';
@@ -264,6 +264,12 @@ export default function MapPage() {
     dishLikes
   } = useStore();
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
+  const [showTextImport, setShowTextImport] = useState(false);
+  const [textImportContent, setTextImportContent] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const [latLng, setLatLng] = useState<PinLatLng | null>(null);
   const [currentPosition, setCurrentPosition] = useState<L.LatLng | null>(null);
   const [addStep, setAddStep] = useState(1);
@@ -295,6 +301,7 @@ export default function MapPage() {
   const [newRestNotes, setNewRestNotes] = useState(() => sessionStorage.getItem('draft_restNotes') ?? '');
   const [newRestLocationName, setNewRestLocationName] = useState(() => sessionStorage.getItem('draft_restLocationName') ?? '');
   const [newRestAddress, setNewRestAddress] = useState(() => sessionStorage.getItem('draft_restAddress') ?? '');
+  const [draftCostForTwo, setDraftCostForTwo] = useState<string>('');
   // Step-2 geocoding state
   const [isGeocodingAddress, setIsGeocodingAddress] = useState(false);
   const [dishPhotos, setDishPhotos] = useState<Array<{
@@ -312,12 +319,14 @@ export default function MapPage() {
     flavorTags: string[];
     isCustomCuisine: boolean;
   }>>([]);
+  const [pendingGallery, setPendingGallery] = useState<string[]>([]);
   const cardContainerRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const scrollTimeoutRef = useRef<number | null>(null);
   const ignoreCarouselSelectionRef = useRef(false);
   const ignoreCarouselSelectionTimeoutRef = useRef<number | null>(null);
   const restaurantPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const batchPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const dishPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const isUploadingDishPhotosRef = useRef(false);
   const restaurantPhotoPreviewRef = useRef<HTMLDivElement | null>(null);
@@ -577,9 +586,213 @@ export default function MapPage() {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   };
 
+  const startRecording = async () => {
+    setAddFormError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'voice-memo.webm');
+        
+        setIsRecording(false);
+        setNetworkBusy(true);
+        try {
+          const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+          const response = await fetch(`${baseUrl}/api/voice-import`, {
+            method: 'POST',
+            body: formData,
+          });
+          
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || 'Voice processing failed');
+          }
+          
+          const data = await response.json();
+          
+          if (data.name) {
+            setNewRestName(data.name);
+            sessionStorage.setItem('draft_restName', data.name);
+          }
+          if (data.address) {
+            setNewRestAddress(data.address);
+            sessionStorage.setItem('draft_restAddress', data.address);
+          }
+          if (data.lat && data.lng) {
+            setLatLng({ lat: data.lat, lng: data.lng });
+          }
+          
+          if (data.dishes && data.dishes.length > 0) {
+            setDishPhotos(data.dishes.map((d: any) => ({
+              id: createId(),
+              imageStorageUrl: '',
+              photoPosition: { x: 50, y: 50 },
+              photoZoom: 1,
+              name: d.name || '',
+              rating: d.rating || 5,
+              priceLevel: d.priceLevel || 2,
+              actualPrice: '',
+              review: d.review || '',
+              reviewDate: new Date().toISOString().slice(0, 10),
+              cuisine: '',
+              flavorTags: [],
+              isCustomCuisine: false
+            })));
+            setShowDishBuilder(true);
+          }
+          
+          setShowVoiceRecorder(false);
+          setAddStep(2);
+        } catch (error: any) {
+          console.error(error);
+          setAddFormError(error.message || 'Failed to process voice memo.');
+        } finally {
+          setNetworkBusy(false);
+        }
+        
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Error accessing microphone:', err);
+      setAddFormError('Microphone access denied or unavailable.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const startTextImport = async () => {
+    if (!textImportContent.trim()) {
+      setAddFormError('Please enter some text to import.');
+      return;
+    }
+    setAddFormError(null);
+    setNetworkBusy(true);
+
+    let dataToMap: any = null;
+
+    try {
+      const parsed = JSON.parse(textImportContent);
+      if (parsed && typeof parsed === 'object') {
+        dataToMap = parsed;
+      }
+    } catch (e) {
+      // Not JSON, fall back to AI
+    }
+
+    try {
+      if (!dataToMap) {
+        const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+        const response = await fetch(`${baseUrl}/api/text-import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: textImportContent }),
+        });
+        
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || 'Text processing failed');
+        }
+        
+        dataToMap = await response.json();
+      }
+      
+      const resto = dataToMap.restaurant || dataToMap;
+      const parsedDishes = dataToMap.dishes || [];
+
+      if (resto.name) {
+        setNewRestName(resto.name);
+        sessionStorage.setItem('draft_restName', resto.name);
+      }
+      if (resto.address) {
+        setNewRestAddress(resto.address);
+        sessionStorage.setItem('draft_restAddress', resto.address);
+      }
+      if (resto.lat || resto.latitude) {
+        setLatLng({ lat: resto.lat || resto.latitude, lng: resto.lng || resto.longitude });
+      }
+      
+      if (resto.area || resto.locationName) {
+        setNewRestLocationName(resto.area || resto.locationName);
+      }
+
+      if (resto.costForTwo) {
+        setDraftCostForTwo(String(resto.costForTwo));
+      }
+
+      let combinedNotes = '';
+      if (resto.description) combinedNotes += resto.description + '\n';
+      if (resto.pros && resto.pros.length) combinedNotes += 'Pros: ' + resto.pros.join(', ') + '\n';
+      if (resto.cons && resto.cons.length) combinedNotes += 'Cons: ' + resto.cons.join(', ');
+      if (combinedNotes) {
+        setNewRestNotes(combinedNotes.trim());
+      }
+      
+      if (parsedDishes && parsedDishes.length > 0) {
+        setDishPhotos(parsedDishes.map((d: any) => {
+          let dishReview = d.review || d.description || '';
+          if (d.pros && d.pros.length) dishReview += '\nPros: ' + d.pros.join(', ');
+          if (d.cons && d.cons.length) dishReview += '\nCons: ' + d.cons.join(', ');
+
+          let cuisineTag = '';
+          if (Array.isArray(d.tags)) cuisineTag = d.tags[0] || '';
+          if (Array.isArray(d.cuisine)) cuisineTag = d.cuisine[0] || '';
+
+          return {
+            id: createId(),
+            imageStorageUrl: '',
+            photoPosition: { x: 50, y: 50 },
+            photoZoom: 1,
+            name: d.name || '',
+            rating: d.rating || 5,
+            priceLevel: d.priceLevel || 2,
+            actualPrice: d.price ? String(d.price) : (d.actualPrice || ''),
+            review: dishReview.trim(),
+            reviewDate: new Date().toISOString().slice(0, 10),
+            cuisine: cuisineTag,
+            flavorTags: Array.isArray(d.tags) ? d.tags : [],
+            isCustomCuisine: false
+          };
+        }));
+        setShowDishBuilder(true);
+      }
+      
+      setShowTextImport(false);
+      setTextImportContent('');
+      setAddStep(2);
+      setTimeout(() => {
+        batchPhotoInputRef.current?.click();
+      }, 300);
+    } catch (error: any) {
+      console.error(error);
+      setAddFormError(error.message || 'Failed to process text import.');
+    } finally {
+      setNetworkBusy(false);
+    }
+  };
+
   const openAddForm = () => {
     setShowAddForm(true);
     setAddStep(1);
+    setShowVoiceRecorder(false);
+    setShowTextImport(false);
   };
 
   const closeAddForm = () => {
@@ -591,6 +804,7 @@ export default function MapPage() {
     setNewRestNotes('');
     setNewRestLocationName('');
     setNewRestAddress('');
+    setDraftCostForTwo('');
     setRestaurantPhoto('');
     setRestaurantPhotoPosition({ x: 50, y: 50 });
     setRestaurantPhotoZoom(1);
@@ -912,6 +1126,13 @@ export default function MapPage() {
     setAddFormError(null);
   };
 
+  const handleBatchPhotoImport = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const urls = await Promise.all(Array.from(files).map(fileToDataUrl));
+    setPendingGallery(prev => [...prev, ...urls]);
+    if (batchPhotoInputRef.current) batchPhotoInputRef.current.value = '';
+  };
+
   const handleDishPhotoUpload = async (files: FileList | null) => {
     if (!files || files.length === 0 || isUploadingDishPhotosRef.current) return;
     isUploadingDishPhotosRef.current = true;
@@ -946,6 +1167,60 @@ export default function MapPage() {
       }))
     ]);
     isUploadingDishPhotosRef.current = false;
+  };
+
+  const handleAssignPhoto = (url: string, targetId: string) => {
+    if (targetId === 'restaurant') {
+      setRestaurantPhoto(url);
+      setRestaurantPhotoPosition({ x: 50, y: 50 });
+      setRestaurantPhotoZoom(1);
+      restaurantPhotoNextPositionRef.current = { x: 50, y: 50 };
+    } else if (targetId === 'new_dish') {
+      const today = new Date().toISOString().slice(0, 10);
+      setDishPhotos((prev) => [
+        ...prev,
+        {
+          id: createId(),
+          imageStorageUrl: url,
+          photoPosition: { x: 50, y: 50 },
+          photoZoom: 1,
+          name: '',
+          rating: 5,
+          priceLevel: 2,
+          actualPrice: '',
+          review: '',
+          reviewDate: today,
+          cuisine: '',
+          flavorTags: [],
+          isCustomCuisine: false
+        }
+      ]);
+      setShowDishBuilder(true);
+    } else {
+      setDishPhotos((prev) => {
+        const existingDish = prev.find(d => d.id === targetId);
+        if (existingDish && existingDish.imageStorageUrl) {
+          return [
+            ...prev,
+            {
+              ...existingDish,
+              id: createId(),
+              imageStorageUrl: url,
+              photoPosition: { x: 50, y: 50 },
+              photoZoom: 1
+            }
+          ];
+        }
+        return prev.map(d => 
+          d.id === targetId ? { ...d, imageStorageUrl: url, photoPosition: { x: 50, y: 50 }, photoZoom: 1 } : d
+        );
+      });
+    }
+    setPendingGallery((prev) => prev.filter((p) => p !== url));
+  };
+
+  const handleRemoveFromGallery = (url: string) => {
+    setPendingGallery((prev) => prev.filter((p) => p !== url));
   };
 
   const addEmptyDishCard = () => {
@@ -1953,10 +2228,104 @@ export default function MapPage() {
               <h2 className="text-xl font-bold">Add Restaurant</h2>
               <button disabled={isApiBusy} onClick={closeAddForm} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"><X size={20} /></button>
             </div>
-            
+            {showVoiceRecorder ? (
+              <div className="flex flex-col items-center justify-center py-12 space-y-6">
+                <div className="text-center space-y-2">
+                  <h3 className="text-lg font-bold">Voice Import</h3>
+                  <p className="text-sm text-gray-500 max-w-[250px]">
+                    Describe the restaurant, location, price, rating, and any dishes you had.
+                  </p>
+                </div>
+                
+                <button
+                  type="button"
+                  onClick={isRecording ? stopRecording : startRecording}
+                  className={`w-24 h-24 rounded-full flex items-center justify-center transition-all ${
+                    isRecording 
+                      ? 'bg-red-50 text-red-500 animate-pulse shadow-[0_0_0_8px_rgba(239,68,68,0.2)]' 
+                      : 'bg-black text-white hover:scale-105'
+                  }`}
+                >
+                  {isRecording ? <Square fill="currentColor" size={32} /> : <Mic size={32} />}
+                </button>
+                
+                <div className="text-sm font-medium text-gray-600 h-6">
+                  {isRecording ? 'Recording... Tap to stop' : 'Tap to start recording'}
+                </div>
+
+                {addFormError && (
+                  <p className="text-sm text-red-600 font-medium px-4 text-center">{addFormError}</p>
+                )}
+                
+                <button
+                  type="button"
+                  onClick={() => setShowVoiceRecorder(false)}
+                  className="mt-8 text-sm font-semibold text-gray-500 hover:text-black"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : showTextImport ? (
+              <div className="flex flex-col py-6 space-y-4">
+                <div className="text-center space-y-2">
+                  <h3 className="text-lg font-bold">Text Import</h3>
+                  <p className="text-sm text-gray-500 max-w-[250px] mx-auto">
+                    Paste your notes or ChatGPT output with restaurant details and dishes.
+                  </p>
+                </div>
+                
+                <textarea
+                  value={textImportContent}
+                  onChange={(e) => setTextImportContent(e.target.value)}
+                  className="w-full h-48 p-4 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none resize-none"
+                  placeholder="e.g. I went to The Table in Colaba. It was expensive. I had the Truffle Fries (5 stars) and Spicy Pasta (4 stars)..."
+                />
+
+                {addFormError && (
+                  <p className="text-sm text-red-600 font-medium">{addFormError}</p>
+                )}
+                
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowTextImport(false)}
+                    className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-medium hover:bg-gray-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={startTextImport}
+                    disabled={!textImportContent.trim()}
+                    className="flex-[2] py-3 rounded-xl bg-black text-white font-medium hover:bg-gray-800 disabled:opacity-60"
+                  >
+                    Process Text
+                  </button>
+                </div>
+              </div>
+            ) : (
             <form onSubmit={handleAddSubmit} className="space-y-4 pb-24">
               <fieldset disabled={isApiBusy} className="space-y-4 disabled:opacity-70">
               <div className={addStep === 1 ? '' : 'hidden'}>
+                <div className="flex gap-2 mb-6">
+                  <button
+                    type="button"
+                    onClick={() => setShowVoiceRecorder(true)}
+                    className="flex-1 bg-red-50 text-red-600 font-bold py-3 rounded-xl border border-red-200 hover:bg-red-100 flex items-center justify-center gap-2 shadow-sm text-sm"
+                  >
+                    <Mic size={18} /> Voice Import
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowTextImport(true)}
+                    className="flex-1 bg-blue-50 text-blue-600 font-bold py-3 rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center justify-center gap-2 shadow-sm text-sm"
+                  >
+                    <FileText size={18} /> Text Import
+                  </button>
+                </div>
+                
+
+
                 <label className="block text-sm font-medium text-gray-700 mb-2">Upload Restaurant Photo</label>
                 <input
                   ref={restaurantPhotoInputRef}
@@ -2020,6 +2389,62 @@ export default function MapPage() {
               </div>
 
               <div className={addStep === 2 ? '' : 'hidden'}>
+                <div className="mb-6 bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-bold text-indigo-900">Photo Pool</label>
+                  </div>
+                  <input
+                    ref={batchPhotoInputRef}
+                    type="file"
+                    accept="image/*,video/*"
+                    multiple
+                    onChange={(e) => handleBatchPhotoImport(e.target.files)}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => batchPhotoInputRef.current?.click()}
+                    disabled={isApiBusy}
+                    className="w-full bg-white text-indigo-600 border border-indigo-200 font-medium py-2.5 rounded-xl hover:bg-indigo-50 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 mb-3 shadow-sm"
+                  >
+                    <ImagePlus size={18} /> Select Multiple Photos
+                  </button>
+                  
+                  {pendingGallery.length > 0 && (
+                    <div className="flex gap-3 overflow-x-auto pb-3 snap-x mt-3">
+                      {pendingGallery.map((url, i) => (
+                        <div key={i} className="min-w-[140px] max-w-[140px] snap-center bg-white border border-gray-200 rounded-xl p-2 shrink-0 flex flex-col shadow-sm">
+                          <img src={url} alt="Pending" className="w-full h-24 object-cover rounded-lg mb-2" />
+                          <select
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                handleAssignPhoto(url, e.target.value);
+                                e.target.value = ''; // Reset for next interaction
+                              }
+                            }}
+                            className="w-full text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            value=""
+                          >
+                            <option value="" disabled>Assign to...</option>
+                            <option value="restaurant">Restaurant</option>
+                            {dishPhotos.map((d, idx) => (
+                              <option key={d.id} value={d.id}>Dish: {d.name || `Dish ${idx + 1}`}</option>
+                            ))}
+                            <option value="new_dish">+ New Dish</option>
+                          </select>
+                          <button 
+                            type="button" 
+                            onClick={() => handleRemoveFromGallery(url)}
+                            className="mt-2 text-xs text-red-500 font-medium hover:text-red-600"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <label className="block text-sm font-medium text-gray-700 mb-2">Set Location</label>
                 <div className="space-y-2">
                   {/* Address geocoding */}
@@ -2222,7 +2647,7 @@ export default function MapPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Cost for two (₹)</label>
-                    <input name="costForTwo" type="number" min="0" className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none" placeholder="600" />
+                    <input name="costForTwo" type="number" min="0" value={draftCostForTwo} onChange={(e) => setDraftCostForTwo(e.target.value)} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none" placeholder="600" />
                   </div>
 
                   <div className="pt-2 border-t border-gray-200">
@@ -2467,6 +2892,7 @@ export default function MapPage() {
                 )}
               </div>
             </form>
+            )}
           </motion.div>
         )}
 

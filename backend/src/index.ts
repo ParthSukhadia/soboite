@@ -92,12 +92,169 @@ app.get('/auth/google/callback', (c) => {
   return c.text('Google OAuth callback - not implemented')
 })
 
+// Voice import
+app.post('/api/voice-import', async (c) => {
+  try {
+    const formData = await c.req.formData();
+    const audioFile = formData.get('audio') as unknown as File;
+    if (!audioFile) {
+      return c.json({ error: 'No audio file provided' }, 400);
+    }
+
+    const arrayBuffer = await audioFile.arrayBuffer();
+    
+    // Convert ArrayBuffer to base64
+    let binary = '';
+    const bytes = new Uint8Array(arrayBuffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    const base64Data = btoa(binary);
+
+    const ai = new GoogleGenAI({ apiKey: (c.env as any).GEMINI_API_KEY });
+
+    const prompt = `
+      You are an assistant helping extract structured data from a user's voice memo about a restaurant visit.
+      Listen to the audio carefully. 
+      1. Identify the restaurant name.
+      2. Use Google Search to find the EXACT address, latitude, and longitude for this restaurant. (assume the city is what the user mentions or context). If you find multiple, pick the most likely one based on context.
+      3. Identify the overall price level (1=cheap, 2=moderate, 3=expensive) and rating (1-5 stars) for the restaurant if mentioned.
+      4. Extract any specific dishes mentioned, along with their ratings and reviews.
+      
+      Return ONLY valid JSON.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        { role: 'user', parts: [
+           { text: prompt },
+           { inlineData: { data: base64Data, mimeType: audioFile.type || 'audio/webm' } }
+        ]}
+      ],
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            address: { type: Type.STRING },
+            lat: { type: Type.NUMBER },
+            lng: { type: Type.NUMBER },
+            priceLevel: { type: Type.NUMBER },
+            review: { type: Type.STRING },
+            rating: { type: Type.NUMBER },
+            cuisine: { type: Type.STRING },
+            serves: { type: Type.STRING },
+            dishes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  rating: { type: Type.NUMBER },
+                  review: { type: Type.STRING },
+                  priceLevel: { type: Type.NUMBER }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return c.json(JSON.parse(response.text || '{}'));
+  } catch (error: any) {
+    console.error('Voice import error:', error);
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Text import
+app.post('/api/text-import', async (c) => {
+  try {
+    const { text } = await c.req.json();
+    if (!text) {
+      return c.json({ error: 'No text provided' }, 400);
+    }
+
+    const ai = new GoogleGenAI({ apiKey: (c.env as any).GEMINI_API_KEY });
+
+    const prompt = `
+      You are an assistant helping extract structured data from a user's text note about a restaurant visit.
+      Read the text carefully. 
+      1. Identify the restaurant name.
+      2. Use Google Search to find the EXACT address, latitude, and longitude for this restaurant. (assume the city is what the user mentions or context). If you find multiple, pick the most likely one based on context.
+      3. Identify the overall price level (1=cheap, 2=moderate, 3=expensive) and rating (1-5 stars) for the restaurant if mentioned.
+      4. Extract any specific dishes mentioned, along with their ratings and reviews.
+      
+      Return ONLY valid JSON.
+      
+      User's Text:
+      ${text}
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        { role: 'user', parts: [ { text: prompt } ] }
+      ],
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            address: { type: Type.STRING },
+            lat: { type: Type.NUMBER },
+            lng: { type: Type.NUMBER },
+            priceLevel: { type: Type.NUMBER },
+            review: { type: Type.STRING },
+            rating: { type: Type.NUMBER },
+            cuisine: { type: Type.STRING },
+            serves: { type: Type.STRING },
+            dishes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  rating: { type: Type.NUMBER },
+                  review: { type: Type.STRING },
+                  priceLevel: { type: Type.NUMBER }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return c.json(JSON.parse(response.text || '{}'));
+  } catch (error: any) {
+    console.error('Text import error:', error);
+    return c.json({ error: error.message }, 500);
+  }
+});
+
 // CRUD for restaurants
 app.post('/api/restaurants', async (c) => {
   const supabase = getSupabase(c);
   const body = normalizeRequestBody(await c.req.json());
+  if (!body.created_at) {
+    body.created_at = Date.now();
+  }
+  
+  console.log("PAYLOAD TO SUPABASE (restaurants):", JSON.stringify(body, null, 2));
+
   const { error, data } = await supabase.from('restaurants').insert(body).select();
-  if (error) return c.json({ error: error.message }, 500);
+  if (error) {
+    console.error('Supabase insert error for restaurants:', JSON.stringify(error, null, 2));
+    return c.json({ error: `Error: ${error.message}; reference = ${error.details || error.hint || JSON.stringify(error)}` }, 500);
+  }
 
   if (data && data.length > 0) {
     const resto = data[0];
@@ -134,8 +291,13 @@ app.delete('/api/restaurants/:id', async (c) => {
 app.post('/api/dishes', async (c) => {
   const supabase = getSupabase(c)
   let body = normalizeRequestBody(await c.req.json())
-  const { error, data } = await supabase.from('dishes').insert(body)
-  if (error) return c.json({ error: error.message }, 500)
+  console.log("PAYLOAD TO SUPABASE (dishes):", JSON.stringify(body, null, 2));
+
+  const { error, data } = await supabase.from('dishes').insert(body).select();
+  if (error) {
+    console.error('Supabase insert error for dishes:', JSON.stringify(error, null, 2));
+    return c.json({ error: `Error: ${error.message}; reference = ${error.details || error.hint || JSON.stringify(error)}` }, 500);
+  }
   // Return inserted row without selecting missing columns
   return c.json(data?.[0] ?? {})
 });
