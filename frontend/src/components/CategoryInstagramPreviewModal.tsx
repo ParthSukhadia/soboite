@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Download, Share2, Camera, Loader2, Moon, Sun, LayoutGrid, Upload, Settings } from 'lucide-react';
 import { api } from '../api';
 import { TopPickCategory, Restaurant } from '../types';
