@@ -233,7 +233,12 @@ const normalizeDbDish = (d: any): Dish => {
     likeCount: typeof d.like_count === 'number' ? d.like_count : (Number(d.like_count) || 0),
     instaPublished: Boolean(d.insta_published ?? d.instaPublished),
     instaPublishedAt: d.insta_published_at ?? d.instaPublishedAt,
-    instaEditedPhotoUrl: d.insta_edited_photo_url ?? d.instaEditedPhotoUrl
+    instaEditedPhotoUrl: d.insta_edited_photo_url ?? d.instaEditedPhotoUrl,
+    pros: Array.isArray(d.pros) ? d.pros : (d.pros ? [String(d.pros)] : undefined),
+    cons: Array.isArray(d.cons) ? d.cons : (d.cons ? [String(d.cons)] : undefined),
+    summary: d.summary,
+    verdict: d.verdict,
+    rank: typeof d.rank === 'number' ? d.rank : (Number(d.rank) || undefined)
   };
 };
 
@@ -439,7 +444,7 @@ export const useStore = create<AppState>()(
 
       updateTopPickRestaurants: async (categoryId: string, restaurantIds: string[]) => {
         const previousRests = get().topPickRestaurants;
-        
+
         const currentTpr = get().topPickRestaurants.filter(r => r.category_id !== categoryId);
         const newTpr = restaurantIds.map((id, index) => ({
           id: `temp-${categoryId}-${id}`,
@@ -473,7 +478,7 @@ export const useStore = create<AppState>()(
             set({ loading: true });
           }
           const fetchId = ++activeFetchId;
-          
+
           try {
             const [restaurants, dishes, types, cuisines, flavorTags, topPicksRes] = await Promise.all([
               api.getRestaurants(),
@@ -490,7 +495,7 @@ export const useStore = create<AppState>()(
             let flavorTagRes = { data: flavorTags, error: null } as any;
 
             if (fetchId !== activeFetchId) {
-              
+
               return;
             }
 
@@ -499,7 +504,7 @@ export const useStore = create<AppState>()(
               return;
             }
 
-            
+
 
             let mappedRests: Restaurant[] = state.restaurants;
             let mappedDishes: Dish[] = state.dishes;
@@ -516,7 +521,7 @@ export const useStore = create<AppState>()(
               }
             }
 
-            
+
             if (!dishRes || dishRes.error) {
               console.error("Dish fetch error after retries:", dishRes?.error);
               return;
@@ -722,7 +727,7 @@ export const useStore = create<AppState>()(
       },
       deleteRestaurant: async (id) => {
         activeFetchId++; // Invalidate any ongoing background fetches
-        
+
         // Optimistic UI update: instantly remove it from the map/UI
         set((state) => ({
           restaurants: state.restaurants.filter((r) => r.id !== id),
@@ -1067,8 +1072,8 @@ export const useStore = create<AppState>()(
       initDeviceUser: () => {
         const state = get();
         if (!state.deviceId) {
-          const newDeviceId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' 
-            ? crypto.randomUUID() 
+          const newDeviceId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
             : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
           set({ deviceId: newDeviceId });
         }
@@ -1116,8 +1121,8 @@ export const useStore = create<AppState>()(
 
           return {
             restaurantLikes: { ...s.restaurantLikes, [restaurantId]: isLike },
-            restaurants: delta !== 0 
-              ? s.restaurants.map(r => r.id === restaurantId ? { ...r, likeCount: (r.likeCount || 0) + delta } : r) 
+            restaurants: delta !== 0
+              ? s.restaurants.map(r => r.id === restaurantId ? { ...r, likeCount: (r.likeCount || 0) + delta } : r)
               : s.restaurants
           };
         });
@@ -1141,8 +1146,8 @@ export const useStore = create<AppState>()(
 
           return {
             dishLikes: { ...s.dishLikes, [dishId]: isLike },
-            dishes: delta !== 0 
-              ? s.dishes.map(d => d.id === dishId ? { ...d, likeCount: (d.likeCount || 0) + delta } : d) 
+            dishes: delta !== 0
+              ? s.dishes.map(d => d.id === dishId ? { ...d, likeCount: (d.likeCount || 0) + delta } : d)
               : s.dishes
           };
         });

@@ -68,6 +68,11 @@ export interface Dish {
   instaPublished?: boolean;
   instaPublishedAt?: string;
   instaEditedPhotoUrl?: string;
+  pros?: string[];
+  cons?: string[];
+  summary?: string;
+  verdict?: string;
+  rank?: number | null;
 }
 
 export interface TopPickCategory {

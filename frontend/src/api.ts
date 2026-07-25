@@ -10,6 +10,22 @@ const defaultApiBase = import.meta.env.DEV
 
 export const apiBase = import.meta.env.VITE_API_BASE?.replace(/\/+$/, "") || defaultApiBase;
 
+async function handleApiError(resp: Response, prefix: string) {
+  let text = await resp.text();
+  let msg = text;
+  try {
+    const json = JSON.parse(text);
+    msg = json.error || json.details || json.message || text;
+  } catch (e) {
+    // not JSON
+  }
+  const fullMsg = msg ? `Something went wrong: ${msg}` : `Something went wrong (${resp.status})`;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('app-error', { detail: fullMsg }));
+  }
+  throw new Error(`${prefix} (${resp.status}): ${text}`);
+}
+
 /** GET helper with JSON response handling */
 async function getJSON<T>(path: string): Promise<T> {
   const url = `${apiBase}${path}`;
@@ -19,11 +35,7 @@ async function getJSON<T>(path: string): Promise<T> {
     credentials: "include",
   });
   if (!resp.ok) {
-    const text = await resp.text();
-    if (resp.status === 500) {
-      console.error(`[500 ERROR] Frontend API GET ${path} failed:`, text);
-    }
-    throw new Error(`API GET ${path} failed (${resp.status}): ${text}`);
+    await handleApiError(resp, `API GET ${path} failed`);
   }
   return (await resp.json()) as T;
 }
@@ -38,11 +50,7 @@ async function sendJSON<T>(method: string, path: string, body: any): Promise<T> 
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
-    const text = await resp.text();
-    if (resp.status === 500) {
-      console.error(`[500 ERROR] Frontend API ${method} ${path} failed:`, text);
-    }
-    throw new Error(`API ${method} ${path} failed (${resp.status}): ${text}`);
+    await handleApiError(resp, `API ${method} ${path} failed`);
   }
   return (await resp.json()) as T;
 }
@@ -123,9 +131,7 @@ export const api = {
       body: JSON.stringify({ name })
     });
     if (!res.ok) {
-      const text = await res.text();
-      if (res.status === 500) console.error(`[500 ERROR] Frontend API POST /api/top-picks/categories failed:`, text);
-      throw new Error(`Failed to create top pick category: ${text}`);
+      await handleApiError(res, `Failed to create top pick category`);
     }
     return res.json();
   },
@@ -137,9 +143,7 @@ export const api = {
       body: JSON.stringify({ name })
     });
     if (!res.ok) {
-      const text = await res.text();
-      if (res.status === 500) console.error(`[500 ERROR] Frontend API PUT /api/top-picks/categories/${id} failed:`, text);
-      throw new Error(`Failed to update top pick category: ${text}`);
+      await handleApiError(res, `Failed to update top pick category`);
     }
     return res.json();
   },
@@ -147,9 +151,7 @@ export const api = {
   async deleteTopPickCategory(id: string) {
     const res = await fetch(`${apiBase}/api/top-picks/categories/${id}`, { method: 'DELETE' });
     if (!res.ok) {
-      const text = await res.text();
-      if (res.status === 500) console.error(`[500 ERROR] Frontend API DELETE /api/top-picks/categories/${id} failed:`, text);
-      throw new Error(`Failed to delete top pick category: ${text}`);
+      await handleApiError(res, `Failed to delete top pick category`);
     }
     return res.json();
   },
@@ -161,9 +163,7 @@ export const api = {
       body: JSON.stringify({ restaurantIds })
     });
     if (!res.ok) {
-      const text = await res.text();
-      if (res.status === 500) console.error(`[500 ERROR] Frontend API POST /api/top-picks/categories/${categoryId}/restaurants failed:`, text);
-      throw new Error(`Failed to update top pick restaurants: ${text}`);
+      await handleApiError(res, `Failed to update top pick restaurants`);
     }
     return res.json();
   },
@@ -182,8 +182,14 @@ export const api = {
   analyzeRestaurantWithGemini: (restaurant: any, dishes: any[], forceRegenerate?: boolean) =>
     sendJSON<{ caption: string, isCached?: boolean, dishes: { id: string, pros: string[], cons: string[], summary: string, verdict?: string }[] }>("POST", "/api/gemini/analyze-restaurant", { restaurant, dishes, forceRegenerate }),
 
+  analyzeDishes: (dishes: any[]) =>
+    sendJSON<{ dishes: { id: string, pros: string[], cons: string[], summary: string, verdict?: string }[] }>("POST", "/api/gemini/analyze-dishes", { dishes }),
+
   saveInsights: (restaurantId: string, caption: string, dishesData: any[]) =>
     sendJSON<{ success: boolean }>("POST", "/api/gemini/save-insights", { restaurantId, caption, dishesData }),
+
+  askGemini: (message: string) =>
+    sendJSON<{ reply?: string, error?: string }>("POST", "/api/gemini/chat", { message }),
 
   loginAdmin: (password: string) =>
     sendJSON<{ success?: boolean, error?: string }>("POST", "/api/admin/login", { password })

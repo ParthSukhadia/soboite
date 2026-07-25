@@ -1,6 +1,8 @@
 -- Enable UUID extension if not enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "citext";
+CREATE EXTENSION IF NOT EXISTS vector;
+
 
 -- Lookup tables for normalized options
 CREATE TABLE IF NOT EXISTS restaurant_types (
@@ -59,7 +61,13 @@ CREATE TABLE dishes (
     is_recommended BOOLEAN DEFAULT FALSE,
     cuisine TEXT,
     flavor_tags TEXT[],
-    serves TEXT
+    serves TEXT,
+    pros TEXT[],
+    cons TEXT[],
+    rank INTEGER,
+    summary TEXT,
+    verdict TEXT,
+    embedding vector(3072)
 );
 
 -- Create Users Table
@@ -98,9 +106,39 @@ SELECT r.*,
 FROM restaurants r;
 
 CREATE OR REPLACE VIEW dishes_with_likes AS
-SELECT d.*,
-       (SELECT COUNT(*) FROM dish_likes dl WHERE dl.dish_id = d.id AND dl.is_like = true) AS like_count
+SELECT d.*, (SELECT COUNT(*) FROM dish_likes dl WHERE dl.dish_id = d.id AND dl.is_like = true) AS like_count 
 FROM dishes d;
+
+-- RPC for Vector Similarity Search on Dishes
+CREATE OR REPLACE FUNCTION match_dishes(
+    query_embedding vector(3072),
+    match_threshold float,
+    match_count int
+)
+RETURNS TABLE (
+    id uuid,
+    restaurant_id uuid,
+    name text,
+    similarity float,
+    rag_context text
+)
+LANGUAGE sql STABLE
+AS $$
+    SELECT
+        id,
+        restaurant_id,
+        name,
+        1 - (embedding <=> query_embedding) AS similarity,
+        'Dish: ' || name || CHR(10) || 
+        'Summary: ' || COALESCE(summary, '') || CHR(10) ||
+        'Pros: ' || COALESCE(array_to_string(pros, ', '), '') || CHR(10) ||
+        'Cons: ' || COALESCE(array_to_string(cons, ', '), '') || CHR(10) ||
+        'Verdict: ' || COALESCE(verdict, '') AS rag_context
+    FROM dishes
+    WHERE embedding IS NOT NULL AND 1 - (embedding <=> query_embedding) > match_threshold
+    ORDER BY embedding <=> query_embedding
+    LIMIT match_count;
+$$;
 
 -- Create Top Pick Categories
 CREATE TABLE IF NOT EXISTS top_pick_categories (

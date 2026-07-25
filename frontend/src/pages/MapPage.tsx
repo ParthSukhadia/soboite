@@ -138,15 +138,27 @@ function MapViewportUpdater({ center }: { center: L.LatLng | null }) {
   useEffect(() => {
     if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
     
-    // Check if the map is visible before flying to avoid NaN errors when container is display:none
-    const size = map.getSize();
-    if (size.x === 0 || size.y === 0) return;
+    const fly = () => {
+      // Check if the map is visible before flying to avoid NaN errors when container is display:none
+      const size = map.getSize();
+      if (size.x > 0 && size.y > 0) {
+        map.flyTo([lat, lng], Math.max(map.getZoom(), 15), {
+          animate: true,
+          duration: 0.6,
+          easeLinearity: 0.25,
+        });
+        return true;
+      }
+      return false;
+    };
 
-    map.flyTo([lat, lng], Math.max(map.getZoom(), 15), {
-      animate: true,
-      duration: 0.6,
-      easeLinearity: 0.25,
-    });
+    if (!fly()) {
+      map.once('resize', fly);
+    }
+    
+    return () => {
+      map.off('resize', fly);
+    };
   }, [lat, lng, map]);
 
   return null;

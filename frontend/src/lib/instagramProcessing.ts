@@ -24,6 +24,29 @@ const drawRoundedRect = (ctx: CanvasRenderingContext2D, x: number, y: number, wi
   ctx.closePath();
 };
 
+const drawStarPath = (ctx: CanvasRenderingContext2D, cx: number, cy: number, spikes: number, outerRadius: number, innerRadius: number) => {
+  let rot = Math.PI / 2 * 3;
+  let x = cx;
+  let y = cy;
+  const step = Math.PI / spikes;
+
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - outerRadius);
+  for (let i = 0; i < spikes; i++) {
+    x = cx + Math.cos(rot) * outerRadius;
+    y = cy + Math.sin(rot) * outerRadius;
+    ctx.lineTo(x, y);
+    rot += step;
+
+    x = cx + Math.cos(rot) * innerRadius;
+    y = cy + Math.sin(rot) * innerRadius;
+    ctx.lineTo(x, y);
+    rot += step;
+  }
+  ctx.lineTo(cx, cy - outerRadius);
+  ctx.closePath();
+};
+
 const wrapText = (context: CanvasRenderingContext2D, text: string, maxWidth: number) => {
   const paragraphs = text.split('\n');
   let lines: string[] = [];
@@ -183,20 +206,6 @@ export const processInstagramImage = async (
     topY += 100;
   });
   topY += 10;
-
-  // Location | Cuisine
-  ctx.font = `normal 32px ${modernFont}`;
-  
-  let currentX = topX;
-  if (locName) {
-    ctx.fillStyle = '#fbbf24'; // Yellow pin
-    ctx.fillText("📍", currentX, topY);
-    currentX += 45;
-    
-    ctx.fillStyle = '#d1d5db'; // Light gray
-    ctx.fillText(locName, currentX, topY);
-  }
-
 
   // Gradient Bottom
   const gradientBottom = ctx.createLinearGradient(0, CANVAS_HEIGHT, 0, CANVAS_HEIGHT - 600);
@@ -381,22 +390,55 @@ export const processInstagramImage = async (
     }
 
   } else if (type === 'restaurant') {
-    // OLD RESTAURANT STYLE BUT MIGRATED TO BOTTOM
-    // The previous implementation for restaurant drew borders, loc text at bottom, we'll keep it simple here
-    // or just use the same box style? We'll leave restaurant styling as mostly unchanged from previous or simple text
     const fadeStartY = CANVAS_HEIGHT - 24;
     ctx.fillStyle = getCuisineColor(cuisineName);
     ctx.fillRect(0, fadeStartY, CANVAS_WIDTH, 24);
 
+    const overallRatingStr = restaurantContext?.overallRating;
+    
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.font = `bold 64px ${modernFont}`;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(cuisineName.toUpperCase(), CANVAS_WIDTH / 2, fadeStartY - 60);
     
-    ctx.font = `italic normal 48px ${modernFont}`;
-    ctx.fillStyle = '#d1d5db';
-    ctx.fillText(locName.toUpperCase(), CANVAS_WIDTH / 2, fadeStartY - 140);
+    // Overall ratings in stars in middle
+    if (overallRatingStr) {
+      const rating = parseFloat(overallRatingStr);
+      const starSize = 35;
+      const spacing = 12;
+      const maxStars = 5;
+      const totalWidth = maxStars * (starSize * 2 + spacing) - spacing;
+      
+      const cy = fadeStartY - 130 - starSize;
+      let currentX = (CANVAS_WIDTH / 2) - (totalWidth / 2) + starSize;
+
+      // Draw empty/disabled stars
+      for (let i = 0; i < maxStars; i++) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        drawStarPath(ctx, currentX, cy, 5, starSize, starSize / 2.2);
+        ctx.fill();
+        currentX += (starSize * 2 + spacing);
+      }
+
+      // Draw highlighted stars with clipping
+      ctx.save();
+      ctx.beginPath();
+      const clipWidth = totalWidth * (rating / maxStars);
+      ctx.rect((CANVAS_WIDTH / 2) - (totalWidth / 2), cy - starSize * 2, clipWidth, starSize * 4);
+      ctx.clip();
+
+      currentX = (CANVAS_WIDTH / 2) - (totalWidth / 2) + starSize;
+      for (let i = 0; i < maxStars; i++) {
+        ctx.fillStyle = '#fbbf24';
+        drawStarPath(ctx, currentX, cy, 5, starSize, starSize / 2.2);
+        ctx.fill();
+        currentX += (starSize * 2 + spacing);
+      }
+      ctx.restore();
+    }
+    
+    // Pin icon Location | Cuisine
+    ctx.font = `bold 56px ${modernFont}`;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`📍 ${locName.toUpperCase()}  |  ${cuisineName.toUpperCase()}`, CANVAS_WIDTH / 2, fadeStartY - 40);
   }
 
   return canvas.toDataURL('image/jpeg', 0.9);

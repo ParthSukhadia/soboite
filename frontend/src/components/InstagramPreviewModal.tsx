@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { processInstagramImage } from '../lib/instagramProcessing';
 import { api } from '../api';
 import { Restaurant, Dish } from '../types';
+import { useStore } from '../store/useStore';
 
 interface InstagramPreviewModalProps {
   isOpen: boolean;
@@ -53,20 +54,33 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
         });
       }
       
-      // Ensure all dishes have an entry
+      // Ensure all dishes have an entry initialized with their existing table values
       dishes.forEach(d => {
-        if (!map.has(d.id)) {
-           map.set(d.id, { id: d.id, pros: [], cons: [], summary: '' });
-        }
+        const existing = map.get(d.id) || {} as any;
+        map.set(d.id, {
+          id: d.id,
+          pros: existing.pros?.length ? existing.pros : (d.pros || []),
+          cons: existing.cons?.length ? existing.cons : (d.cons || []),
+          summary: existing.summary || d.summary || '',
+          verdict: existing.verdict || d.verdict || (d.isRecommended ? "Must try" : "Okayish"),
+          rank: existing.rank ?? (d.rank ?? null)
+        });
       });
       
       setDishAnalyses(map);
       setStep('review');
     } catch (err) {
       console.warn("Failed to fetch gemini analysis from backend:", err);
-      // Fallback
+      // Fallback directly to existing dish insights from DB/store
       const map = new Map<string, any>();
-      dishes.forEach(d => map.set(d.id, { id: d.id, pros: [], cons: [], summary: '' }));
+      dishes.forEach(d => map.set(d.id, {
+        id: d.id,
+        pros: d.pros || [],
+        cons: d.cons || [],
+        summary: d.summary || '',
+        verdict: d.verdict || (d.isRecommended ? "Must try" : "Okayish"),
+        rank: d.rank ?? null
+      }));
       setDishAnalyses(map);
       setStep('review');
     }
@@ -85,17 +99,30 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
             pros: analysis?.pros || [],
             cons: analysis?.cons || [],
             summary: analysis?.summary || '',
-            verdict: analysis?.verdict || (d.isRecommended ? "Must try" : "Okayish")
+            verdict: analysis?.verdict || (d.isRecommended ? "Must try" : "Okayish"),
+            rank: analysis?.rank ?? (d.rank ?? null)
           };
         });
         await api.saveInsights(restaurant.id, captionText, dishAnalysesPayload);
+        dishAnalysesPayload.forEach(p => {
+          useStore.getState().updateDish(p.id, {
+            pros: p.pros,
+            cons: p.cons,
+            summary: p.summary,
+            verdict: p.verdict,
+            rank: p.rank
+          });
+        });
       } catch (e) {
         console.warn("Could not save insights to DB:", e);
       }
 
       // Process Restaurant Image
       try {
-        const dataUrl = await processInstagramImage(restaurant, 'restaurant');
+        const dishAverage = dishes.length > 0 ? (dishes.reduce((sum, d) => sum + (d.rating || 0), 0) / dishes.length) : 0;
+        const validRatings = [restaurant.ambienceRating, restaurant.serviceRating, dishAverage].filter(r => typeof r === 'number' && r > 0) as number[];
+        const overallRating = validRatings.length > 0 ? (validRatings.reduce((a, b) => a + b, 0) / validRatings.length).toFixed(1) : undefined;
+        const dataUrl = await processInstagramImage(restaurant, 'restaurant', { overallRating });
         generatedPreviews.push({ type: 'restaurant', id: restaurant.id, url: dataUrl });
       } catch (e) {
         console.warn("Could not generate restaurant image:", e);

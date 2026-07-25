@@ -49,10 +49,22 @@ function MapUpdater({ center }: { center: L.LatLng }) {
   useEffect(() => {
     if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
     
-    const size = map.getSize();
-    if (size.x === 0 || size.y === 0) return;
+    const fly = () => {
+      const size = map.getSize();
+      if (size.x > 0 && size.y > 0) {
+        map.flyTo([lat, lng], map.getZoom());
+        return true;
+      }
+      return false;
+    };
 
-    map.flyTo([lat, lng], map.getZoom());
+    if (!fly()) {
+      map.once('resize', fly);
+    }
+
+    return () => {
+      map.off('resize', fly);
+    };
   }, [lat, lng, map]);
   return null;
 }

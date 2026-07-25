@@ -9,6 +9,7 @@ import {
   Map as MapIcon,
   Pencil,
   Plus,
+  Sparkles,
   Star,
   Trash2,
   ThumbsUp,
@@ -61,6 +62,9 @@ interface DishEditDraft {
   photos: PhotoEntry[];
   primaryPhotoId?: string;
   tags: string[];
+  pros?: string[];
+  cons?: string[];
+  rank?: number | null;
 }
 
 const reviewTimestamp = (value?: string) => {
@@ -347,6 +351,37 @@ export default function RestaurantDetails() {
   const [editingDishDraft, setEditingDishDraft] =
     useState<DishEditDraft | null>(null);
 
+  const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
+
+  const handleGenerateInsightsForEditingDish = async () => {
+    if (!editingDishDraft) return;
+    setIsGeneratingInsights(true);
+    try {
+      const dishData = {
+        name: editingDishDraft.name,
+        rating: editingDishDraft.rating,
+        cuisine: editingDishDraft.cuisine || restaurant?.cuisine,
+        review: editingDishDraft.review
+      };
+      const res = await api.analyzeDishes([dishData]);
+      if (res.dishes && res.dishes.length > 0) {
+        const generated = res.dishes[0];
+        setEditingDishDraft(prev => prev ? {
+          ...prev,
+          pros: generated.pros || [],
+          cons: generated.cons || [],
+          summary: generated.summary || '',
+          verdict: generated.verdict || ''
+        } : null);
+      }
+    } catch (err) {
+      console.error("Failed to generate insights:", err);
+      alert("Failed to generate insights");
+    } finally {
+      setIsGeneratingInsights(false);
+    }
+  };
+
   const [showInstagramPreview, setShowInstagramPreview] = useState(false);
 
   const [isSavingDish, setIsSavingDish] = useState(false);
@@ -438,6 +473,51 @@ export default function RestaurantDetails() {
       active = false;
     };
   }, [id, needsPhotoFetch, fetchRestaurantPhotos]);
+
+  const [isGeneratingMissingInsights, setIsGeneratingMissingInsights] = useState(false);
+
+  useEffect(() => {
+    // Check if we have dishes and are not already generating
+    if (!id || restaurantDishes.length === 0 || isGeneratingMissingInsights) return;
+
+    // Find dishes that lack both pros and cons, but have some review or rating
+    const missingInsightsDishes = restaurantDishes.filter(
+      (d) => (!d.pros || d.pros.length === 0) && (!d.cons || d.cons.length === 0) && (d.review || (d.reviews && d.reviews.length > 0))
+    );
+
+    if (missingInsightsDishes.length > 0) {
+      let active = true;
+      setIsGeneratingMissingInsights(true);
+      
+      const generateInsights = async () => {
+        try {
+          // Requires api.analyzeDishes to be defined in frontend/src/api.ts
+          const res = await api.analyzeDishes(missingInsightsDishes);
+          if (active && res.dishes && res.dishes.length > 0) {
+            // Update local store with new insights so UI updates immediately
+            res.dishes.forEach((d: any) => {
+              updateDish(d.id, {
+                pros: d.pros,
+                cons: d.cons,
+                summary: d.summary,
+                verdict: d.verdict
+              });
+            });
+          }
+        } catch (err) {
+          console.warn("Failed to generate missing insights:", err);
+        } finally {
+          if (active) setIsGeneratingMissingInsights(false);
+        }
+      };
+
+      generateInsights();
+
+      return () => {
+        active = false;
+      };
+    }
+  }, [id, restaurantDishes, isGeneratingMissingInsights, updateDish]);
 
   // Keep batch-entry rows in sync with selected photos.
   useEffect(() => {
@@ -751,6 +831,9 @@ export default function RestaurantDetails() {
       photos,
       primaryPhotoId: resolvePrimaryPhotoId(photos, dish.primaryPhotoId),
       tags: dish.flavorTags ?? [],
+      pros: dish.pros ? [...dish.pros] : [],
+      cons: dish.cons ? [...dish.cons] : [],
+      rank: dish.rank ?? null,
     });
   };
 
@@ -986,6 +1069,9 @@ export default function RestaurantDetails() {
         imageStorageUrl,
         isRecommended: editingDishDraft.isRecommended,
         serves: editingDishDraft.serves.trim() || undefined,
+        pros: editingDishDraft.pros?.filter(Boolean) || [],
+        cons: editingDishDraft.cons?.filter(Boolean) || [],
+        rank: typeof editingDishDraft.rank === 'number' ? editingDishDraft.rank : (Number(editingDishDraft.rank) || null),
       });
 
       closeEditDish();
@@ -1565,6 +1651,9 @@ export default function RestaurantDetails() {
                           )}
                         <div className="flex items-start justify-between gap-3 mb-2">
                           <h3 className="text-base sm:text-lg font-bold text-gray-900 leading-tight flex flex-wrap items-center gap-2 break-words whitespace-normal">
+                            {dish.rank === 1 && <span title="1st Place" className="text-xl">👑</span>}
+                            {dish.rank === 2 && <span title="2nd Place" className="text-xl grayscale brightness-110">👑</span>}
+                            {dish.rank === 3 && <span title="3rd Place" className="text-xl sepia hue-rotate-[330deg] saturate-150 brightness-90">👑</span>}
                             {dish.name}
                           </h3>
                         </div>
@@ -1636,6 +1725,27 @@ export default function RestaurantDetails() {
                               noteSize={16}
                               className="h-6 w-6"
                             />
+                          </div>
+                        )}
+
+                        {((dish.pros && dish.pros.length > 0) || (dish.cons && dish.cons.length > 0)) && (
+                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            {dish.pros && dish.pros.length > 0 && (
+                              <div className="bg-green-50 p-2.5 rounded-xl border border-green-100 shadow-sm">
+                                <div className="font-bold text-green-700 mb-1 flex items-center gap-1">✅ Pros</div>
+                                <ul className="list-disc pl-4 space-y-1 text-green-800 font-medium">
+                                  {dish.pros.map((pro, i) => <li key={i}>{pro}</li>)}
+                                </ul>
+                              </div>
+                            )}
+                            {dish.cons && dish.cons.length > 0 && (
+                              <div className="bg-red-50 p-2.5 rounded-xl border border-red-100 shadow-sm">
+                                <div className="font-bold text-red-700 mb-1 flex items-center gap-1">❌ Cons</div>
+                                <ul className="list-disc pl-4 space-y-1 text-red-800 font-medium">
+                                  {dish.cons.map((con, i) => <li key={i}>{con}</li>)}
+                                </ul>
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -1879,6 +1989,111 @@ export default function RestaurantDetails() {
                             <ImagePlus size={14} />
                             Add dish photos
                           </button>
+                        </div>
+
+                        <div className="border-t border-gray-200 pt-3 space-y-3">
+                          <div className="flex justify-between items-center">
+                            <h5 className="text-xs font-bold uppercase text-gray-500">AI Insights & Ranking</h5>
+                            <button
+                              type="button"
+                              disabled={isGeneratingInsights}
+                              onClick={handleGenerateInsightsForEditingDish}
+                              className="text-xs inline-flex items-center gap-1 font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded border border-indigo-200 hover:bg-indigo-100 disabled:opacity-50"
+                              title="Generate Pros & Cons with Gemini"
+                            >
+                              {isGeneratingInsights ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                              Generate
+                            </button>
+                          </div>
+                          <div>
+                            <div className="flex justify-between items-center mb-1">
+                              <label className="block text-sm font-medium text-green-700">Pros</label>
+                              <button
+                                type="button"
+                                onClick={() => updateEditingDraft({ pros: [...(editingDishDraft.pros || []), ''] })}
+                                className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-200 hover:bg-green-100"
+                              >
+                                + Add Pro
+                              </button>
+                            </div>
+                            {(editingDishDraft.pros || []).map((pro, idx) => (
+                              <div key={idx} className="flex gap-1 mb-1">
+                                <input
+                                  type="text"
+                                  value={pro}
+                                  onChange={(e) => {
+                                    const next = [...(editingDishDraft.pros || [])];
+                                    next[idx] = e.target.value;
+                                    updateEditingDraft({ pros: next });
+                                  }}
+                                  className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 border border-gray-200 rounded-lg"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = [...(editingDishDraft.pros || [])];
+                                    next.splice(idx, 1);
+                                    updateEditingDraft({ pros: next });
+                                  }}
+                                  className="px-2 text-red-500 hover:text-red-700 font-bold"
+                                >
+                                  &times;
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div>
+                            <div className="flex justify-between items-center mb-1">
+                              <label className="block text-sm font-medium text-red-700">Cons</label>
+                              <button
+                                type="button"
+                                onClick={() => updateEditingDraft({ cons: [...(editingDishDraft.cons || []), ''] })}
+                                className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200 hover:bg-red-100"
+                              >
+                                + Add Con
+                              </button>
+                            </div>
+                            {(editingDishDraft.cons || []).map((con, idx) => (
+                              <div key={idx} className="flex gap-1 mb-1">
+                                <input
+                                  type="text"
+                                  value={con}
+                                  onChange={(e) => {
+                                    const next = [...(editingDishDraft.cons || [])];
+                                    next[idx] = e.target.value;
+                                    updateEditingDraft({ cons: next });
+                                  }}
+                                  className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 border border-gray-200 rounded-lg"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = [...(editingDishDraft.cons || [])];
+                                    next.splice(idx, 1);
+                                    updateEditingDraft({ cons: next });
+                                  }}
+                                  className="px-2 text-red-500 hover:text-red-700 font-bold"
+                                >
+                                  &times;
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-purple-700 mb-1">Rank (Crown)</label>
+                            <select
+                              value={editingDishDraft.rank || ""}
+                              onChange={(e) => updateEditingDraft({ rank: e.target.value ? Number(e.target.value) : null })}
+                              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm"
+                            >
+                              <option value="">No Rank</option>
+                              <option value="1">🥇 1st (Gold)</option>
+                              <option value="2">🥈 2nd (Silver)</option>
+                              <option value="3">🥉 3rd (Bronze)</option>
+                            </select>
+                          </div>
                         </div>
 
                         <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">

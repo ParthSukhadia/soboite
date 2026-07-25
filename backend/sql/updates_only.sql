@@ -128,6 +128,51 @@ CREATE INDEX IF NOT EXISTS idx_restaurants_location_name ON restaurants(location
 
 ALTER TABLE dishes ADD COLUMN IF NOT EXISTS serves TEXT;
 
+ALTER TABLE dishes ADD COLUMN IF NOT EXISTS pros TEXT[];
+ALTER TABLE dishes ADD COLUMN IF NOT EXISTS cons TEXT[];
+ALTER TABLE dishes ADD COLUMN IF NOT EXISTS rank INTEGER;
+ALTER TABLE dishes ADD COLUMN IF NOT EXISTS summary TEXT;
+ALTER TABLE dishes ADD COLUMN IF NOT EXISTS verdict TEXT;
+
+-- Drop view before altering table to avoid dependency errors
 DROP VIEW IF EXISTS dishes_with_likes CASCADE;
+
+-- Enable pgvector and add embedding to dishes
+CREATE EXTENSION IF NOT EXISTS vector;
+ALTER TABLE dishes ADD COLUMN IF NOT EXISTS embedding vector(3072);
+ALTER TABLE dishes ALTER COLUMN embedding TYPE vector(3072);
+
+-- Recreate view after table schema is updated
 CREATE OR REPLACE VIEW dishes_with_likes AS
 SELECT d.*, (SELECT COUNT(*) FROM dish_likes dl WHERE dl.dish_id = d.id AND dl.is_like = true) AS like_count FROM dishes d;
+
+-- RPC for Vector Similarity Search on Dishes
+CREATE OR REPLACE FUNCTION match_dishes(
+    query_embedding vector(3072),
+    match_threshold float,
+    match_count int
+)
+RETURNS TABLE (
+    id uuid,
+    restaurant_id uuid,
+    name text,
+    similarity float,
+    rag_context text
+)
+LANGUAGE sql STABLE
+AS $$
+    SELECT
+        id,
+        restaurant_id,
+        name,
+        1 - (embedding <=> query_embedding) AS similarity,
+        'Dish: ' || name || CHR(10) || 
+        'Summary: ' || COALESCE(summary, '') || CHR(10) ||
+        'Pros: ' || COALESCE(array_to_string(pros, ', '), '') || CHR(10) ||
+        'Cons: ' || COALESCE(array_to_string(cons, ', '), '') || CHR(10) ||
+        'Verdict: ' || COALESCE(verdict, '') AS rag_context
+    FROM dishes
+    WHERE embedding IS NOT NULL AND 1 - (embedding <=> query_embedding) > match_threshold
+    ORDER BY embedding <=> query_embedding
+    LIMIT match_count;
+$$;

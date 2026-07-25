@@ -6,6 +6,11 @@ import { Zernio } from '@zernio/node'
 import { GoogleGenAI, Type } from '@google/genai'
 const app = new Hono()
 
+app.onError((err, c) => {
+  console.error(`[GLOBAL ERROR] ${c.req.method} ${c.req.url}`, err);
+  return c.json({ error: 'Something went wrong', details: err.message }, 500);
+});
+
 app.use('*', async (c, next) => {
   await next()
   if (c.res.status === 500) {
@@ -13,7 +18,7 @@ app.use('*', async (c, next) => {
     let errorDetail = ''
     try {
       errorDetail = await res.text()
-    } catch(e) {}
+    } catch (e) { }
     console.error(`[500 ERROR] ${c.req.method} ${c.req.url} -`, errorDetail)
   }
 })
@@ -59,7 +64,7 @@ app.get('/api/restaurants', async (c) => {
 // Get all dishes
 app.get('/api/dishes', async (c) => {
   const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('dishes_with_likes').select('id, name, restaurant_id, rating, price_level, actual_price, serves, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, like_count')
+  const { data, error } = await supabase.from('dishes_with_likes').select('id, name, restaurant_id, rating, price_level, actual_price, serves, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, like_count, pros, cons, summary, verdict, rank')
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data);
 })
@@ -119,7 +124,7 @@ app.post('/api/text-import', async (c) => {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [
-        { role: 'user', parts: [ { text: prompt } ] }
+        { role: 'user', parts: [{ text: prompt }] }
       ],
       config: {
         tools: [{ googleSearch: {} }],
@@ -167,7 +172,7 @@ app.post('/api/restaurants', async (c) => {
   if (!body.created_at) {
     body.created_at = Date.now();
   }
-  
+
   console.log("PAYLOAD TO SUPABASE (restaurants):", JSON.stringify(body, null, 2));
 
   const { error, data } = await supabase.from('restaurants').insert(body).select();
@@ -207,10 +212,101 @@ app.delete('/api/restaurants/:id', async (c) => {
   return c.text('Deleted');
 });
 
+async function generateDishEmbedding(apiKey: string, dishData: any, restaurantName: string = '') {
+  try {
+    const genAI = new GoogleGenAI({ apiKey });
+    const ragContext = `Restaurant:\n${restaurantName || 'Unknown'}\n\nDish:\n${dishData.name || 'Unknown'}\n\nSummary:\n${dishData.summary || ''}\n\nPros:\n${(dishData.pros || []).join('\n')}\n\nCons:\n${(dishData.cons || []).join('\n')}\n\nKeywords:\n${dishData.cuisine || ''}\n${(dishData.flavor_tags || dishData.tags || []).join('\n')}`;
+
+    const response = await genAI.models.embedContent({
+      model: 'gemini-embedding-2',
+      contents: ragContext
+    });
+    
+    let values = null;
+    if ((response as any).embeddings && (response as any).embeddings.length > 0) {
+      values = (response as any).embeddings[0].values;
+    } else if ((response as any).embedding && (response as any).embedding.values) {
+      values = (response as any).embedding.values;
+    } else if (Array.isArray(response) && response[0]?.values) {
+      values = response[0].values;
+    }
+    
+    if (values) {
+      console.log(`[EMBEDDING GENERATED & SAVED] For dish: "${dishData.name}" | Restaurant: "${restaurantName}" | Dimension: ${values.length}`);
+      return { embedding: JSON.stringify(values) };
+    }
+    return null;
+  } catch (err) {
+    console.error("Failed to generate embedding", err);
+    return null;
+  }
+}
+
 // CRUD for dishes
 app.post('/api/dishes', async (c) => {
   const supabase = getSupabase(c)
   let body = normalizeRequestBody(await c.req.json())
+
+  // Generate pros and cons via Gemini straight at the time of creating the dish
+  const apiKey = (c.env as any).GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+  if (apiKey && (!body.pros || !body.cons) && (body.name || body.review || body.reviews)) {
+    try {
+      const genAI = new GoogleGenAI({ apiKey });
+      const revText = typeof body.review === 'string' ? body.review : (Array.isArray(body.reviews) ? body.reviews.map((r: any) => r.text || r).join('; ') : '');
+      const prompt = `You are a food critic and social media expert analyzing a restaurant dish.
+Dish Name: ${body.name || 'Dish'}
+Rating: ${body.rating || 'N/A'}/5
+Cuisine: ${body.cuisine || 'Various'}
+Review: ${revText || 'No review text provided. Evaluate based on rating and name.'}
+
+Generate a concise analysis: 1-3 pros, 0-2 cons, a short summary sentence, and a verdict ("Must try", "Okayish", or "Skip").
+Each pro and con MUST be extremely concise (max 5-7 words).
+Return ONLY a JSON object with 'pros' (array of strings), 'cons' (array of strings), 'summary' (string), and 'verdict' (string).`;
+
+      const response = await genAI.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              pros: { type: Type.ARRAY, items: { type: Type.STRING } },
+              cons: { type: Type.ARRAY, items: { type: Type.STRING } },
+              summary: { type: Type.STRING },
+              verdict: { type: Type.STRING },
+            },
+            required: ['pros', 'cons', 'summary', 'verdict'],
+          },
+          temperature: 0.5,
+        },
+      });
+
+      if (response.text) {
+        const aiResult = JSON.parse(response.text);
+        if (!body.pros && Array.isArray(aiResult.pros)) body.pros = aiResult.pros;
+        if (!body.cons && Array.isArray(aiResult.cons)) body.cons = aiResult.cons;
+        if (!body.summary && aiResult.summary) body.summary = aiResult.summary;
+        if (!body.verdict && aiResult.verdict) body.verdict = aiResult.verdict;
+      }
+    } catch (err) {
+      console.warn('Could not generate Gemini insights during dish creation:', err);
+    }
+  }
+
+  // Generate embedding if API key is present
+  if (apiKey && body.restaurant_id) {
+    try {
+      const { data: resto } = await supabase.from('restaurants').select('name').eq('id', body.restaurant_id).single();
+      const embedResult = await generateDishEmbedding(apiKey, body, resto?.name);
+      if (embedResult?.embedding) {
+        body.embedding = embedResult.embedding;
+      }
+    } catch (err) {
+      console.warn("Failed to generate embedding for new dish", err);
+    }
+  }
+
   console.log("PAYLOAD TO SUPABASE (dishes):", JSON.stringify(body, null, 2));
 
   const { error, data } = await supabase.from('dishes').insert(body).select();
@@ -226,6 +322,24 @@ app.put('/api/dishes/:id', async (c) => {
   const supabase = getSupabase(c)
   const id = c.req.param('id')
   let updates = normalizeRequestBody(await c.req.json())
+
+  // Generate embedding if there are changes to fields that matter
+  const apiKey = (c.env as any).GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+  if (apiKey && (updates.pros || updates.cons || updates.summary || updates.name || updates.cuisine || updates.tags)) {
+    try {
+      const { data: existingDish } = await supabase.from('dishes').select('*, restaurants(name)').eq('id', id).single();
+      if (existingDish) {
+        const mergedData = { ...existingDish, ...updates };
+        const embedResult = await generateDishEmbedding(apiKey, mergedData, existingDish.restaurants?.name);
+        if (embedResult?.embedding) {
+          updates.embedding = embedResult.embedding;
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to generate embedding for updated dish", err);
+    }
+  }
+
   const { error, data } = await supabase.from('dishes').update(updates).eq('id', id)
   if (error) return c.json({ error: error.message }, 500)
   // Return updated row without selecting missing columns
@@ -407,20 +521,34 @@ app.post('/api/gemini/analyze-restaurant', async (c) => {
     const { restaurant, dishes, forceRegenerate } = await c.req.json();
     const supabase = getSupabase(c);
 
-    // CHECK DB FIRST
+    // Extract existing pros, cons, rank, etc., straight from dishes table rows
+    const dishInsightsFromDb = (dishes || []).map((d: any) => ({
+      id: d.id,
+      pros: d.pros || [],
+      cons: d.cons || [],
+      summary: d.summary || '',
+      verdict: d.verdict || (d.isRecommended || d.is_recommended ? 'Must try' : 'Okayish'),
+      rank: typeof d.rank === 'number' ? d.rank : (Number(d.rank) || null)
+    }));
+
+    // CHECK DB FIRST FOR CAPTION
     const { data: existingInsight, error: insightError } = await supabase
       .from('ai_publish_insights')
       .select('caption, dishes_data')
       .eq('restaurant_id', restaurant.id)
       .order('created_at', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
-    if (!forceRegenerate && existingInsight && existingInsight.dishes_data && !insightError) {
-      console.log("=== Found existing insights in DB, skipping Gemini ===");
+    const hasValidData = existingInsight &&
+      existingInsight.caption &&
+      existingInsight.caption.trim() !== '';
+
+    if (!forceRegenerate && hasValidData && !insightError) {
+      console.log("=== Found existing caption in DB, skipping Gemini ===");
       return c.json({
         caption: existingInsight.caption,
-        dishes: existingInsight.dishes_data,
+        dishes: dishInsightsFromDb,
         isCached: true
       });
     }
@@ -431,7 +559,9 @@ app.post('/api/gemini/analyze-restaurant', async (c) => {
     const dishesInfo = dishes.map((d: any) => {
       const revs = d.reviews || [];
       const reviewText = revs.map((r: any) => `- "${r.text}"`).join('\n');
-      return `Dish ID: ${d.id}\nDish: ${d.name} (Rating: ${d.rating}/5)\nReviews:\n${reviewText}`;
+      const prosText = (d.pros || []).join(', ');
+      const consText = (d.cons || []).join(', ');
+      return `Dish ID: ${d.id}\nDish: ${d.name} (Rating: ${d.rating}/5)\nPros: ${prosText}\nCons: ${consText}\nReviews:\n${reviewText}`;
     }).join('\\n\\n');
 
     const prompt = `
@@ -440,11 +570,10 @@ Restaurant Name: ${restaurant.name}
 Cuisine: ${restaurant.cuisine || 'Various'}
 Location: ${restaurant.locationName || 'Unknown'}
 
-Here are the dishes and their reviews:
+Here are the dishes, pros/cons, and user reviews:
 ${dishesInfo}
 
-First, for each dish, generate a short analysis (1-3 pros, 0-1 cons). Each point MUST be extremely concise (max 5-7 words).
-Second, generate a beautifully formatted Instagram caption for the entire restaurant.
+Generate a beautifully formatted Instagram caption for the entire restaurant.
 
 CRITICAL FORMATTING INSTRUCTIONS FOR CAPTION:
 - You MUST use actual newline characters (\n) to preserve line breaks.
@@ -476,11 +605,8 @@ Review:
 \n\n
 #Hashtags (generate 5 relevant hashtags)
 
-Return ONLY a JSON object containing 'dishes' (array of dish analysis) and 'caption' (the formatted string).
+Return ONLY a JSON object containing 'caption' (the formatted string).
 `;
-
-    // Enable API Logs
-
 
     const response = await genAI.models.generateContent({
       model: 'gemini-2.5-flash',
@@ -494,45 +620,23 @@ Return ONLY a JSON object containing 'dishes' (array of dish analysis) and 'capt
               type: Type.STRING,
               description: 'The formatted Instagram caption',
             },
-            dishes: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  id: { type: Type.STRING },
-                  pros: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: 'Short list of pros',
-                  },
-                  cons: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: 'Short list of cons',
-                  },
-                  summary: {
-                    type: Type.STRING,
-                    description: 'Short summary sentence',
-                  },
-                },
-                required: ['id', 'pros', 'cons', 'summary'],
-              },
-            },
           },
-          required: ['caption', 'dishes'],
+          required: ['caption'],
         },
         temperature: 0.7,
       },
     });
 
     if (response.text) {
-
       const result = JSON.parse(response.text);
       if (result.caption) {
-        // Replace literal string "\n" with actual newline character just in case LLM double escaped it
         result.caption = result.caption.replace(/\\n/g, '\n');
       }
-      return c.json(result);
+      return c.json({
+        caption: result.caption,
+        dishes: dishInsightsFromDb,
+        isCached: false
+      });
     }
     return c.json({ error: 'Empty response from Gemini' }, 500);
   } catch (error: any) {
@@ -547,15 +651,199 @@ app.post('/api/gemini/save-insights', async (c) => {
     const { restaurantId, caption, dishesData } = await c.req.json();
     if (!restaurantId) return c.json({ error: 'restaurantId is required' }, 400);
 
+    // Save pros, cons, summary, verdict, and rank straight into the existing dishes table!
+    if (Array.isArray(dishesData)) {
+      for (const d of dishesData) {
+        if (d.id) {
+          await supabase.from('dishes').update({
+            pros: d.pros || [],
+            cons: d.cons || [],
+            summary: d.summary || null,
+            verdict: d.verdict || null,
+            rank: typeof d.rank === 'number' ? d.rank : (Number(d.rank) || null)
+          }).eq('id', d.id);
+        }
+      }
+    }
+
     const { error } = await supabase.from('ai_publish_insights').insert({
       restaurant_id: restaurantId,
       caption: caption,
       dishes_data: dishesData
     });
 
-    if (error) return c.json({ error: error.message }, 500);
+    if (error && !error.message?.includes('schema')) console.warn("Notice on ai_publish_insights insert:", error.message);
     return c.json({ success: true });
   } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+app.post('/api/gemini/analyze-dishes', async (c) => {
+  const apiKey = (c.env as any).GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return c.json({ error: 'GEMINI_API_KEY is not configured.' }, 500);
+  }
+  try {
+    const { dishes } = await c.req.json();
+    if (!Array.isArray(dishes) || dishes.length === 0) {
+      return c.json({ dishes: [] });
+    }
+    const supabase = getSupabase(c);
+    const genAI = new GoogleGenAI({ apiKey });
+
+    const dishesInfo = dishes.map((d: any) => {
+      const revs = d.reviews || [];
+      const reviewText = revs.map((r: any) => `- "${r.text}"`).join('\n');
+      return `Dish ID: ${d.id}\nDish: ${d.name} (Rating: ${d.rating}/5)\nCuisine: ${d.cuisine || 'Various'}\nReviews:\n${reviewText || d.review || ''}`;
+    }).join('\n\n');
+
+    const prompt = `You are a food critic analyzing several restaurant dishes.
+Here are the dishes:
+${dishesInfo}
+
+For each dish, generate 1-3 pros, 0-2 cons, a short one-line summary, and a verdict ("Must try", "Okayish", or "Skip").
+Each point in pros and cons MUST be extremely concise (max 5-7 words).
+Return ONLY a JSON object with 'dishes' as an array of objects containing 'id', 'pros', 'cons', 'summary', and 'verdict'.`;
+
+    const response = await genAI.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            dishes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  pros: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  cons: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  summary: { type: Type.STRING },
+                  verdict: { type: Type.STRING }
+                },
+                required: ['id', 'pros', 'cons', 'summary', 'verdict']
+              }
+            }
+          },
+          required: ['dishes']
+        },
+        temperature: 0.5
+      }
+    });
+
+    if (response.text) {
+      const result = JSON.parse(response.text);
+      const analyzedDishes = result.dishes || [];
+      for (const d of analyzedDishes) {
+        if (d.id) {
+          const originalDish = dishes.find((od: any) => od.id === d.id);
+          const updateData: any = {
+            pros: d.pros || [],
+            cons: d.cons || [],
+            summary: d.summary || null,
+            verdict: d.verdict || null
+          };
+
+          if (originalDish) {
+            const mergedData = { ...originalDish, ...updateData };
+            const { data: resto } = await supabase.from('restaurants').select('name').eq('id', originalDish.restaurantId || originalDish.restaurant_id).single();
+            const embedResult = await generateDishEmbedding(apiKey, mergedData, resto?.name);
+            if (embedResult?.embedding) {
+              updateData.embedding = embedResult.embedding;
+            }
+          }
+
+          await supabase.from('dishes').update(updateData).eq('id', d.id);
+        }
+      }
+      return c.json({ dishes: analyzedDishes });
+    }
+    return c.json({ error: 'Empty response from Gemini' }, 500);
+  } catch (error: any) {
+    console.error('Failed to analyze dishes:', error);
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+app.post('/api/gemini/chat', async (c) => {
+  const apiKey = (c.env as any).GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) return c.json({ error: 'GEMINI_API_KEY is not configured.' }, 500);
+
+  try {
+    const { message } = await c.req.json();
+    if (!message) return c.json({ error: 'Message is required' }, 400);
+
+    const supabase = getSupabase(c);
+    const genAI = new GoogleGenAI({ apiKey });
+
+    // 1. Generate embedding for the user's question
+    const embedResponse = await genAI.models.embedContent({
+      model: 'gemini-embedding-2',
+      contents: message
+    });
+    
+    let queryEmbedding = null;
+    if ((embedResponse as any).embeddings && (embedResponse as any).embeddings.length > 0) {
+      queryEmbedding = (embedResponse as any).embeddings[0].values;
+    } else if ((embedResponse as any).embedding && (embedResponse as any).embedding.values) {
+      queryEmbedding = (embedResponse as any).embedding.values;
+    } else if (Array.isArray(embedResponse) && embedResponse[0]?.values) {
+      queryEmbedding = embedResponse[0].values;
+    }
+
+    if (!queryEmbedding) {
+      return c.json({ error: 'Failed to generate embedding for query' }, 500);
+    }
+
+    // 2. Perform vector search using RPC match_dishes
+    const { data: matchedDishes, error } = await supabase.rpc('match_dishes', {
+      query_embedding: JSON.stringify(queryEmbedding),
+      match_threshold: 0.5,
+      match_count: 10
+    });
+
+    if (error) {
+      console.error("Vector search error:", error);
+      return c.json({ error: 'Vector search failed' }, 500);
+    }
+
+    // fetch total restaurant count
+    const { count: restoCount } = await supabase.from('restaurants').select('*', { count: 'exact', head: true });
+
+    // 3. Construct context
+    const contextStr = (matchedDishes || []).map((d: any) => d.rag_context).join('\n\n');
+
+    // 4. Generate answer
+    const prompt = `You are Soboite, a helpful and expert food app assistant.
+Soboite is a curated restaurant guide for South Mumbai (SoBo). It features top restaurants, detailed dish reviews, pros/cons, and AI-powered insights.
+Currently, Soboite has ${restoCount || 'many'} restaurants listed in its database.
+ONLY answer using the following data.
+If the answer is not contained below or you don't know, say "I don't have enough information."
+
+Context:
+${contextStr}
+
+User Question: ${message}`;
+
+    console.log(`[GEMINI REQUEST PROMPT] \n${prompt}\n`);
+
+    const chatResponse = await genAI.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        temperature: 0.7
+      }
+    });
+
+    console.log(`[GEMINI RESPONSE] \n${chatResponse.text}\n`);
+
+    return c.json({ reply: chatResponse.text });
+  } catch (err: any) {
+    console.error('Failed to chat:', err);
     return c.json({ error: err.message }, 500);
   }
 });
@@ -1046,7 +1334,7 @@ app.post('/api/top-picks/publish-instagram', async (c) => {
   let body: any = {};
   try {
     body = await c.req.json();
-  } catch (e) {}
+  } catch (e) { }
 
   const imageUrl = body.imageUrl;
   const caption = body.caption;
@@ -1080,7 +1368,7 @@ app.post('/api/top-picks/publish-instagram', async (c) => {
 
     if (result.error) throw new Error(typeof result.error === 'string' ? result.error : JSON.stringify(result.error));
     let postData = result.data as any;
-    
+
     // Log event
     await supabase.from('app_events').insert({
       type: 'CATEGORY_PUBLISHED',

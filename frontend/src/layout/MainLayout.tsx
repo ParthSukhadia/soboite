@@ -1,11 +1,12 @@
 import { useRef, useState, FormEvent, useEffect, useMemo } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { DatabaseZap, Download, Settings2, Upload, LogIn, LogOut, Lock, X, Menu, Eye, EyeOff, Loader2, RotateCw, Share2, Bell } from 'lucide-react';
+import { DatabaseZap, Download, Settings2, Upload, LogIn, LogOut, Lock, X, Menu, Eye, EyeOff, Loader2, RotateCw, Share2, Bell, Sparkles } from 'lucide-react';
 import { api } from '../api';
 import { useStore } from '../store/useStore';
 import { processInstagramImage } from '../lib/instagramProcessing';
 import { useToast } from '../components/Toast';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { AIChatModal } from '../components/AIChatModal';
 import { AppEvent } from '../types';
 
 interface ExportPayload {
@@ -113,6 +114,7 @@ export default function MainLayout() {
   // Registration state
   const [regFirstName, setRegFirstName] = useState('');
   const [regLastName, setRegLastName] = useState('');
+  const [showChatModal, setShowChatModal] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
 
   const { addToast } = useToast();
@@ -286,6 +288,51 @@ export default function MainLayout() {
       setStatusMessage(null);
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Failed to publish all to Instagram.', 'error');
+      setStatusMessage(null);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleBackfillInsights = async () => {
+    setIsProcessing(true);
+    setStatusMessage('Backfilling dish insights...');
+    setShowSettings(false);
+    try {
+      const dishesToProcess = Object.values(dishes).filter(d => !d.pros || d.pros.length === 0);
+      if (dishesToProcess.length === 0) {
+        addToast('All dishes already have pros and cons!', 'info');
+        setStatusMessage(null);
+        setIsProcessing(false);
+        return;
+      }
+
+      let count = 0;
+      for (const d of dishesToProcess) {
+        setStatusMessage(`Processing dish ${count + 1} of ${dishesToProcess.length}: ${d.name}...`);
+        try {
+           const dishData = {
+              id: d.id,
+              name: d.name,
+              rating: d.rating,
+              cuisine: d.cuisine || '',
+              review: d.review || '',
+              restaurantId: d.restaurantId
+           };
+           await api.analyzeDishes([dishData]);
+           // Small delay to prevent hitting Gemini rate limits
+           await new Promise(resolve => setTimeout(resolve, 1000));
+           count++;
+        } catch (e) {
+           console.error("Failed to analyze dish", d.name, e);
+        }
+      }
+      
+      await fetchData(true);
+      addToast(`Successfully generated insights for ${count} dishes!`, 'success');
+      setStatusMessage(null);
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to backfill insights.', 'error');
       setStatusMessage(null);
     } finally {
       setIsProcessing(false);
@@ -647,6 +694,16 @@ export default function MainLayout() {
                       <button
                         type="button"
                         disabled={isProcessing}
+                        onClick={() => void handleBackfillInsights()}
+                        className="w-full inline-flex items-center gap-2 rounded-xl border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-700 hover:bg-purple-100 disabled:opacity-60 disabled:cursor-not-allowed mt-2"
+                      >
+                        <Sparkles size={14} />
+                        Generate All Missing Pros & Cons
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isProcessing}
                         onClick={() => void clearAllData()}
                         className="w-full inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100 disabled:opacity-60 disabled:cursor-not-allowed"
                       >
@@ -805,6 +862,14 @@ export default function MainLayout() {
                     className="w-full inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-100"
                   >
                     <Share2 size={14} /> Publish All to Instagram
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={() => { setShowMobileMenu(false); void handleBackfillInsights(); }}
+                    className="w-full inline-flex items-center gap-2 rounded-xl border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-700 hover:bg-purple-100 mt-2"
+                  >
+                    <Sparkles size={14} /> Generate All Missing Pros & Cons
                   </button>
                 </div>
               )}
@@ -997,6 +1062,22 @@ export default function MainLayout() {
         }}
         onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
       />
+
+      {/* Global AI Chat FAB */}
+      {editMode && currentPath === '/' && (
+        <button
+          onClick={() => setShowChatModal(true)}
+          className="fixed bottom-[110px] right-6 sm:bottom-[90px] sm:right-6 bg-gradient-to-br from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-full p-4 shadow-2xl active:scale-95 transition-transform flex items-center justify-center z-[1000]"
+          aria-label="Open AI Chat"
+        >
+          <Sparkles size={24} />
+        </button>
+      )}
+
+      {/* AI Chat Modal */}
+      {showChatModal && editMode && currentPath === '/' && (
+        <AIChatModal onClose={() => setShowChatModal(false)} />
+      )}
     </div>
   );
 }
