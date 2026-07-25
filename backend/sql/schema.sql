@@ -36,6 +36,7 @@ CREATE TABLE restaurants (
     image_storage_url TEXT,
     photos JSONB,
     primary_photo_id TEXT,
+    instagram_caption TEXT,
     type TEXT,
     cuisine TEXT,
     cost_for_two INTEGER,

@@ -532,22 +532,19 @@ app.post('/api/gemini/analyze-restaurant', async (c) => {
     }));
 
     // CHECK DB FIRST FOR CAPTION
-    const { data: existingInsight, error: insightError } = await supabase
-      .from('ai_publish_insights')
-      .select('caption, dishes_data')
-      .eq('restaurant_id', restaurant.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: restoData, error: restoError } = await supabase
+      .from('restaurants')
+      .select('instagram_caption')
+      .eq('id', restaurant.id)
+      .single();
 
-    const hasValidData = existingInsight &&
-      existingInsight.caption &&
-      existingInsight.caption.trim() !== '';
+    const existingCaption = restoData?.instagram_caption;
+    const hasValidData = existingCaption && existingCaption.trim() !== '';
 
-    if (!forceRegenerate && hasValidData && !insightError) {
+    if (!forceRegenerate && hasValidData && !restoError) {
       console.log("=== Found existing caption in DB, skipping Gemini ===");
       return c.json({
-        caption: existingInsight.caption,
+        caption: existingCaption,
         dishes: dishInsightsFromDb,
         isCached: true
       });
@@ -666,13 +663,12 @@ app.post('/api/gemini/save-insights', async (c) => {
       }
     }
 
-    const { error } = await supabase.from('ai_publish_insights').insert({
-      restaurant_id: restaurantId,
-      caption: caption,
-      dishes_data: dishesData
-    });
-
-    if (error && !error.message?.includes('schema')) console.warn("Notice on ai_publish_insights insert:", error.message);
+    if (caption) {
+      const { error } = await supabase.from('restaurants').update({
+        instagram_caption: caption
+      }).eq('id', restaurantId);
+      if (error) console.warn("Notice on instagram_caption update:", error.message);
+    }
     return c.json({ success: true });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
@@ -1199,41 +1195,47 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
     ].filter(Boolean).join('\n\n');
   }
 
-  let finalUrls: string[] = [];
+  let mediaToPublish: { url: string; type: string }[] = [];
 
-  if (restaurantImageUrl || Object.keys(dishImageUrls).length > 0) {
-    if (restaurantImageUrl) finalUrls.push(restaurantImageUrl);
-    if (dishes) {
-      dishes.forEach(dish => {
-        if (dishImageUrls[dish.id]) {
-          finalUrls.push(dishImageUrls[dish.id]);
-        }
-      });
-    }
-    finalUrls = finalUrls.slice(0, 10);
-  } else {
-    // Gather photos
-    const imageUrls: string[] = [];
-    if (restaurant.image_storage_url) {
-      imageUrls.push(restaurant.image_storage_url);
-    } else if (restaurant.photos && restaurant.photos.length > 0) {
-      imageUrls.push(restaurant.photos[0].url);
-    }
-
-    if (dishes) {
-      dishes.forEach(dish => {
-        if (dish.image_storage_url) {
-          imageUrls.push(dish.image_storage_url);
-        } else if (dish.photos && dish.photos.length > 0) {
-          imageUrls.push(dish.photos[0].url);
-        }
-      });
-    }
-
-    finalUrls = imageUrls.slice(0, 10); // Max 10 items for carousel
+  // 1. Add Restaurant Cover Photo
+  if (restaurantImageUrl) {
+    mediaToPublish.push({ url: restaurantImageUrl, type: 'IMAGE' });
+  } else if (restaurant.image_storage_url) {
+    mediaToPublish.push({ url: restaurant.image_storage_url, type: 'IMAGE' });
+  } else if (restaurant.photos && restaurant.photos.length > 0) {
+    mediaToPublish.push({ url: restaurant.photos[0].url, type: restaurant.photos[0].type || 'IMAGE' });
   }
 
-  if (finalUrls.length === 0) {
+  // 2. Add Dish Photos and Videos
+  if (dishes && dishes.length > 0) {
+    dishes.forEach(dish => {
+      // If there's an edited Info Card for this dish, add it first
+      if (dishImageUrls && dishImageUrls[dish.id]) {
+        mediaToPublish.push({ url: dishImageUrls[dish.id], type: 'IMAGE' });
+
+        // Then add the remaining raw media for this dish as B-Roll (skip index 0 as it was the base for Info Card)
+        if (dish.photos && dish.photos.length > 1) {
+          const rawMedia = dish.photos.slice(1);
+          rawMedia.forEach((media: any) => {
+            mediaToPublish.push({ url: media.url, type: media.type || 'IMAGE' });
+          });
+        }
+      } else if (dish.image_storage_url) {
+        // Fallback: No edited image, just use storage URL
+        mediaToPublish.push({ url: dish.image_storage_url, type: 'IMAGE' });
+      } else if (dish.photos && dish.photos.length > 0) {
+        // Fallback: No edited image, use all raw photos/videos for this dish
+        dish.photos.forEach((media: any) => {
+          mediaToPublish.push({ url: media.url, type: media.type || 'IMAGE' });
+        });
+      }
+    });
+  }
+
+  // Enforce Instagram's strict 10-item carousel limit
+  const finalMediaItems = mediaToPublish.slice(0, 10);
+
+  if (finalMediaItems.length === 0) {
     return c.json({ error: 'No photos available to publish' }, 400);
   }
 
@@ -1243,7 +1245,7 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
       body: {
         content: caption,
         publishNow: true,
-        mediaItems: finalUrls.map(url => ({ url })),
+        mediaItems: finalMediaItems.map(media => ({ url: media.url, type: media.type })),
         platforms: [
           {
             platform: 'instagram',
@@ -1260,29 +1262,8 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
     let postData = result.data as any;
     const postId = postData?.id;
 
-    if (postId) {
-      // Poll up to 12 times, 5 seconds apart (total 60 seconds max)
-      for (let i = 0; i < 12; i++) {
-        await new Promise(resolve => setTimeout(resolve, 5000));
-
-        const statusRes = await zernio.posts.getPost({ path: { postId } });
-        if (statusRes.error) {
-          console.error(`Error polling post ${postId}:`, JSON.stringify(statusRes.error));
-          // If we fail to fetch, just keep the last known postData and break
-          break;
-        }
-
-        postData = statusRes.data as any;
-
-        // Check if the post reached a terminal state
-        if (['published', 'failed', 'partial', 'cancelled'].includes(postData?.status)) {
-          break;
-        }
-      }
-    }
-
-    if (postData?.status === 'published' || postData?.status === 'partial') {
-      // Update restaurant in DB
+    if (postId && postData?.status !== 'failed') {
+      // Update restaurant in DB (Optimistic update since we removed polling)
       await supabase.from('restaurants').update({
         insta_published: true,
         insta_published_at: new Date().toISOString(),
@@ -1306,17 +1287,15 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
       // Log event
       await supabase.from('app_events').insert({
         type: 'RESTO_PUBLISHED',
-        message: `${restaurant.name} was published to Instagram!`,
+        message: `${restaurant.name} was queued for publishing to Instagram!`,
         link_url: `/restaurant/${id}`
       });
 
-      // Save AI insights data
-      if (caption || dishAnalyses.length > 0) {
-        await supabase.from('ai_publish_insights').insert({
-          restaurant_id: id,
-          caption: caption,
-          dishes_data: dishAnalyses
-        });
+      // Save caption to restaurants table if provided
+      if (caption) {
+        await supabase.from('restaurants').update({
+          instagram_caption: caption
+        }).eq('id', id);
       }
     }
 
