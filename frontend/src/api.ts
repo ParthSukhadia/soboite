@@ -171,11 +171,14 @@ export const api = {
   sendPushNotification: (restaurantName: string) =>
     sendJSON<void>("POST", "/api/push-notification", { message: `New restaurant added: ${restaurantName}! Check it out now.` }),
     
-  publishToInstagram: (restaurantId: string, payload: { restaurantImageUrl: string, dishImageUrls: Record<string, string>, caption?: string, dishAnalyses?: any[] }) =>
+  publishToInstagram: (restaurantId: string, payload: { restaurantImageUrl?: string, dishImageUrls?: Record<string, string>, caption?: string, dishAnalyses?: any[], customMediaSequence?: { url: string, type: string }[] }) =>
     sendJSON<{ success: boolean; url?: string }>("POST", `/api/restaurants/${restaurantId}/publish-instagram`, payload),
 
   publishTopPickToInstagram: (payload: { imageUrl: string, caption?: string }) =>
     sendJSON<{ success: boolean; url?: string }>("POST", "/api/top-picks/publish-instagram", payload),
+
+  generateEmbeddings: (restaurantId: string) =>
+    sendJSON<{ success: boolean, message?: string }>("POST", `/api/restaurants/${restaurantId}/generate-embeddings`, {}),
 
   getEvents: () => getJSON<any[]>("/api/events"),
   

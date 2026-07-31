@@ -17,7 +17,8 @@ import {
   X,
   Bell,
   Camera,
-  Merge
+  Merge,
+  Copy
 } from "lucide-react";
 import { useForm as useRHForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -352,6 +353,7 @@ export default function RestaurantDetails() {
     useState<DishEditDraft | null>(null);
 
   const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
+  const [isGeneratingEmbeddings, setIsGeneratingEmbeddings] = useState(false);
 
   const handleGenerateInsightsForEditingDish = async () => {
     if (!editingDishDraft) return;
@@ -710,6 +712,25 @@ export default function RestaurantDetails() {
     }
   };
 
+  const handleGenerateEmbeddings = async () => {
+    if (!restaurant || isGeneratingEmbeddings) return;
+    setIsGeneratingEmbeddings(true);
+    addToast('Generating embeddings for all dishes...', 'info');
+    try {
+      const res = await api.generateEmbeddings(restaurant.id);
+      if (res.success) {
+        addToast(res.message || 'Embeddings generated successfully!', 'success');
+      } else {
+        addToast('Failed to generate embeddings', 'error');
+      }
+    } catch (err: any) {
+      console.error('Embedding generation failed:', err);
+      addToast(`Error: ${err.message}`, 'error');
+    } finally {
+      setIsGeneratingEmbeddings(false);
+    }
+  };
+
   const handlePushNotification = () => {
     if (!restaurant || isApiBusy) return;
     setConfirmModal({
@@ -721,12 +742,70 @@ export default function RestaurantDetails() {
     });
   };
 
+  const handleCopyToClipboard = async () => {
+    if (!restaurant) return;
+    
+    let text = `Restaurant: ${restaurant.name}\n`;
+    if (restaurant.cuisine) text += `Cuisine: ${restaurant.cuisine}\n`;
+    if (restaurant.type) text += `Type: ${restaurant.type}\n`;
+    if (restaurant.locationName) text += `Location: ${restaurant.locationName}\n`;
+    if (restaurant.address) text += `Address: ${restaurant.address}\n`;
+    
+    const dishAverage = restaurantDishes.length > 0 ? (restaurantDishes.reduce((sum, d) => sum + (d.rating || 0), 0) / restaurantDishes.length) : 0;
+    const validRatings = [restaurant.ambienceRating, restaurant.serviceRating, dishAverage].filter(r => typeof r === 'number' && r > 0) as number[];
+    const overallRating = validRatings.length > 0 ? (validRatings.reduce((a, b) => a + b, 0) / validRatings.length).toFixed(1) : undefined;
+    
+    if (overallRating) text += `Overall Rating: ${overallRating}/5\n`;
+    if (restaurant.ambienceRating) text += `Ambience: ${restaurant.ambienceRating}/5\n`;
+    if (restaurant.serviceRating) text += `Service: ${restaurant.serviceRating}/5\n`;
+    if (restaurant.notes) text += `Notes: ${restaurant.notes}\n`;
+    
+    text += `\nDishes:\n`;
+    restaurantDishes.forEach((dish, idx) => {
+      text += `\n${idx + 1}. ${dish.name}\n`;
+      text += `   Rating: ${dish.rating}/5\n`;
+      if (dish.actualPrice) text += `   Price: ${dish.actualPrice}\n`;
+      else if (dish.priceLevel) text += `   Price Level: ${dish.priceLevel}\n`;
+      if (dish.review) text += `   Review: ${dish.review}\n`;
+      if (dish.reviews && dish.reviews.length > 0) {
+        text += `   User Reviews:\n`;
+        dish.reviews.forEach((r: any) => {
+          text += `   - ${r.text}\n`;
+        });
+      }
+    });
+    
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "absolute";
+        textArea.style.left = "-999999px";
+        document.body.prepend(textArea);
+        textArea.select();
+        try {
+          document.execCommand('copy');
+        } catch (error) {
+          throw new Error("execCommand failed");
+        } finally {
+          textArea.remove();
+        }
+      }
+      addToast('Copied restaurant details to clipboard!', 'success');
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+      addToast('Failed to copy to clipboard', 'error');
+    }
+  };
+
   const handlePublishInstagram = async () => {
     if (!restaurant || isApiBusy) return;
     setShowInstagramPreview(true);
   };
 
-  const handleConfirmPublishInstagram = async (payload: { restaurantImage: string, dishImages: Record<string, string>, caption?: string, dishAnalyses?: any[] }) => {
+  const handleConfirmPublishInstagram = async (payload: { restaurantImage?: string, dishImages?: Record<string, string>, caption?: string, dishAnalyses?: any[], customMediaSequence?: { url: string, type: string }[] }) => {
     if (!restaurant) return;
     try {
       addToast('Uploading custom images and publishing to Instagram... This may take a few seconds.', 'info');
@@ -734,8 +813,10 @@ export default function RestaurantDetails() {
       const uploadedRestaurantUrl = payload.restaurantImage ? await api.uploadImage(payload.restaurantImage) : '';
       
       const uploadedDishUrls: Record<string, string> = {};
-      for (const [dishId, dataUrl] of Object.entries(payload.dishImages)) {
-        uploadedDishUrls[dishId] = await api.uploadImage(dataUrl);
+      if (payload.dishImages) {
+        for (const [dishId, dataUrl] of Object.entries(payload.dishImages)) {
+          uploadedDishUrls[dishId] = await api.uploadImage(dataUrl);
+        }
       }
       
       const structuredPayload = {
@@ -1340,6 +1421,22 @@ export default function RestaurantDetails() {
               >
                 <Bell size={16} />
                 Push Notification
+              </button>
+              <button 
+                onClick={handleGenerateEmbeddings}
+                disabled={isApiBusy || isGeneratingEmbeddings}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 transition-colors disabled:opacity-60"
+              >
+                {isGeneratingEmbeddings ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
+                Generate Embeddings
+              </button>
+              <button 
+                onClick={handleCopyToClipboard}
+                disabled={isApiBusy}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60"
+              >
+                <Copy size={16} />
+                Copy Details
               </button>
             </div>
           )}

@@ -3,16 +3,17 @@ import { processInstagramImage } from '../lib/instagramProcessing';
 import { api } from '../api';
 import { Restaurant, Dish } from '../types';
 import { useStore } from '../store/useStore';
+import { useNavigate } from 'react-router-dom';
 
 interface InstagramPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onPublish: (payload: { restaurantImage: string, dishImages: Record<string, string>, caption?: string, dishAnalyses?: any[] }) => Promise<void>;
+  onPublish: (payload: { restaurantImage?: string, dishImages?: Record<string, string>, caption?: string, dishAnalyses?: any[], customMediaSequence?: { url: string, type: string }[] }) => Promise<void>;
   restaurant: Restaurant;
   dishes: Dish[];
 }
 
-type Step = 'loading' | 'review' | 'generating' | 'preview';
+type Step = 'choose_generation' | 'loading' | 'review' | 'generating' | 'preview';
 
 export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
   isOpen,
@@ -22,21 +23,37 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
   dishes
 }) => {
   const [step, setStep] = useState<Step>('loading');
-  const [previews, setPreviews] = useState<{ type: 'restaurant' | 'dish', id: string, url: string }[]>([]);
+  const [previews, setPreviews] = useState<{ type: 'restaurant' | 'dish' | 'b-roll', mediaType: 'image' | 'video', id: string, url: string, selected: boolean }[]>([]);
+  const navigate = useNavigate();
   const [isPublishing, setIsPublishing] = useState(false);
   const [captionText, setCaptionText] = useState('');
   const [dishAnalyses, setDishAnalyses] = useState<Map<string, { id: string, pros: string[], cons: string[], summary: string, verdict?: string, rank?: 1 | 2 | 3 | null }>>(new Map());
   const [isCached, setIsCached] = useState(false);
+  const hasExistingImages = !!restaurant.instaEditedPhotoUrl || dishes.some(d => !!d.instaEditedPhotoUrl);
 
   useEffect(() => {
     if (isOpen) {
-      setStep('loading');
+      setStep('choose_generation');
       setCaptionText('');
       setPreviews([]);
       setIsCached(false);
-      fetchAnalysis();
     }
   }, [isOpen]);
+
+  const setupManualAnalysis = () => {
+    const map = new Map<string, any>();
+    dishes.forEach(d => map.set(d.id, {
+      id: d.id,
+      pros: d.pros || [],
+      cons: d.cons || [],
+      summary: d.summary || '',
+      verdict: d.verdict || (d.isRecommended ? "Must try" : "Okayish"),
+      rank: d.rank ?? null
+    }));
+    setDishAnalyses(map);
+    setCaptionText('');
+    setStep('review');
+  };
 
   const fetchAnalysis = async (forceRegenerate = false) => {
     try {
@@ -71,26 +88,13 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
       setStep('review');
     } catch (err) {
       console.warn("Failed to fetch gemini analysis from backend:", err);
-      // Fallback directly to existing dish insights from DB/store
-      const map = new Map<string, any>();
-      dishes.forEach(d => map.set(d.id, {
-        id: d.id,
-        pros: d.pros || [],
-        cons: d.cons || [],
-        summary: d.summary || '',
-        verdict: d.verdict || (d.isRecommended ? "Must try" : "Okayish"),
-        rank: d.rank ?? null
-      }));
-      setDishAnalyses(map);
-      setStep('review');
+      setupManualAnalysis();
     }
   };
 
   const generateImages = async () => {
     setStep('generating');
     try {
-      const generatedPreviews: { type: 'restaurant' | 'dish', id: string, url: string }[] = [];
-      
       try {
         const dishAnalysesPayload = dishes.map(d => {
           const analysis = dishAnalyses.get(d.id);
@@ -117,15 +121,31 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
         console.warn("Could not save insights to DB:", e);
       }
 
+      const fullSequence: typeof previews = [];
+      let currentSelectedCount = 0;
+
+      // Helper to add if under limit
+      const addMedia = (item: Omit<typeof previews[0], 'selected'>) => {
+        const selected = currentSelectedCount < 10;
+        if (selected) currentSelectedCount++;
+        fullSequence.push({ ...item, selected });
+      };
+
       // Process Restaurant Image
+      let restaurantDataUrl: string | undefined;
       try {
         const dishAverage = dishes.length > 0 ? (dishes.reduce((sum, d) => sum + (d.rating || 0), 0) / dishes.length) : 0;
         const validRatings = [restaurant.ambienceRating, restaurant.serviceRating, dishAverage].filter(r => typeof r === 'number' && r > 0) as number[];
         const overallRating = validRatings.length > 0 ? (validRatings.reduce((a, b) => a + b, 0) / validRatings.length).toFixed(1) : undefined;
-        const dataUrl = await processInstagramImage(restaurant, 'restaurant', { overallRating });
-        generatedPreviews.push({ type: 'restaurant', id: restaurant.id, url: dataUrl });
+        restaurantDataUrl = await processInstagramImage(restaurant, 'restaurant', { overallRating });
+        addMedia({ type: 'restaurant', mediaType: 'image', id: restaurant.id, url: restaurantDataUrl });
       } catch (e) {
         console.warn("Could not generate restaurant image:", e);
+        if (restaurant.imageStorageUrl) {
+          addMedia({ type: 'restaurant', mediaType: 'image', id: `rest-raw`, url: restaurant.imageStorageUrl });
+        } else if (restaurant.photos && restaurant.photos.length > 0) {
+          addMedia({ type: 'restaurant', mediaType: (restaurant.photos[0].type || 'image') as 'image'|'video', id: `rest-raw`, url: restaurant.photos[0].url });
+        }
       }
 
       // Process Dish Images
@@ -136,17 +156,32 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
       });
 
       for (const dish of sortedDishes) {
+        let addedEdited = false;
         try {
           const analysis = dishAnalyses.get(dish.id);
           const dataUrl = await processInstagramImage(dish, 'dish', restaurant, analysis as any);
-          generatedPreviews.push({ type: 'dish', id: dish.id, url: dataUrl });
+          addMedia({ type: 'dish', mediaType: 'image', id: dish.id, url: dataUrl });
+          addedEdited = true;
         } catch (e) {
           console.warn("Could not generate dish image:", e);
         }
+
+        if (addedEdited) {
+          if (dish.photos && dish.photos.length > 1) {
+            dish.photos.slice(1).forEach((media, idx) => {
+               addMedia({ type: 'b-roll', mediaType: (media.type || 'image') as 'image'|'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+            });
+          }
+        } else if (dish.imageStorageUrl) {
+          addMedia({ type: 'b-roll', mediaType: 'image', id: `dish-${dish.id}-raw`, url: dish.imageStorageUrl });
+        } else if (dish.photos && dish.photos.length > 0) {
+          dish.photos.forEach((media, idx) => {
+             addMedia({ type: 'b-roll', mediaType: (media.type || 'image') as 'image'|'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+          });
+        }
       }
       
-      // Slice to max 10 for Instagram Carousel
-      setPreviews(generatedPreviews.slice(0, 10));
+      setPreviews(fullSequence);
       setStep('preview');
     } catch (error) {
       console.error("Error processing images:", error);
@@ -155,14 +190,72 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
     }
   };
 
+  const loadExistingImages = () => {
+    const fullSequence: typeof previews = [];
+    let currentSelectedCount = 0;
+
+    const addMedia = (item: Omit<typeof previews[0], 'selected'>) => {
+      const selected = currentSelectedCount < 10;
+      if (selected) currentSelectedCount++;
+      fullSequence.push({ ...item, selected });
+    };
+
+    if (restaurant.instaEditedPhotoUrl) {
+      addMedia({ type: 'restaurant', mediaType: 'image', id: restaurant.id, url: restaurant.instaEditedPhotoUrl });
+    } else if (restaurant.imageStorageUrl) {
+      addMedia({ type: 'restaurant', mediaType: 'image', id: `rest-raw`, url: restaurant.imageStorageUrl });
+    } else if (restaurant.photos && restaurant.photos.length > 0) {
+      addMedia({ type: 'restaurant', mediaType: (restaurant.photos[0].type || 'image') as 'image'|'video', id: `rest-raw`, url: restaurant.photos[0].url });
+    }
+    
+    const sortedDishes = [...dishes].sort((a, b) => {
+      const rankA = dishAnalyses.get(a.id)?.rank || 999;
+      const rankB = dishAnalyses.get(b.id)?.rank || 999;
+      return rankA - rankB;
+    });
+
+    for (const dish of sortedDishes) {
+      let addedEdited = false;
+      if (dish.instaEditedPhotoUrl) {
+        addMedia({ type: 'dish', mediaType: 'image', id: dish.id, url: dish.instaEditedPhotoUrl });
+        addedEdited = true;
+      }
+
+      if (addedEdited) {
+        if (dish.photos && dish.photos.length > 1) {
+          dish.photos.slice(1).forEach((media, idx) => {
+            addMedia({ type: 'b-roll', mediaType: (media.type || 'image') as 'image'|'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+          });
+        }
+      } else if (dish.imageStorageUrl) {
+        addMedia({ type: 'b-roll', mediaType: 'image', id: `dish-${dish.id}-raw`, url: dish.imageStorageUrl });
+      } else if (dish.photos && dish.photos.length > 0) {
+        dish.photos.forEach((media, idx) => {
+          addMedia({ type: 'b-roll', mediaType: (media.type || 'image') as 'image'|'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+        });
+      }
+    }
+    
+    setPreviews(fullSequence);
+    setStep('preview');
+  };
+
   const handleDownloadAll = () => {
-    previews.forEach((p, index) => {
+    previews.filter(p => p.selected && p.mediaType === 'image').forEach((p, index) => {
       const link = document.createElement('a');
       link.href = p.url;
       link.download = `instagram-ready-${index + 1}.jpg`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+    });
+  };
+
+  const togglePreviewSelection = (index: number) => {
+    setPreviews(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], selected: !next[index].selected };
+      return next;
     });
   };
 
@@ -216,6 +309,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
       <div className="bg-white md:rounded-lg shadow-xl w-full h-full md:h-auto md:max-w-5xl flex flex-col max-h-screen md:max-h-[90vh]">
         <div className="p-4 border-b flex justify-between items-center bg-white md:rounded-t-lg shrink-0 z-10 shadow-sm md:shadow-none">
           <h2 className="text-lg md:text-xl font-bold truncate pr-2">
+            {step === 'choose_generation' && 'Generate Insights'}
             {step === 'loading' && 'Analyzing with Gemini...'}
             {step === 'review' && 'Step 1: Review Content'}
             {step === 'generating' && 'Generating Overlays...'}
@@ -229,6 +323,35 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-hidden flex flex-col">
+          {step === 'choose_generation' && (
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+              <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-6">
+                <span className="text-3xl">✨</span>
+              </div>
+              <h3 className="text-2xl font-bold text-gray-800 mb-4">Generate Insights with Gemini?</h3>
+              <p className="text-gray-600 mb-8 max-w-md">
+                Gemini can automatically read through all your dish reviews to generate Pros, Cons, and an Instagram caption for you.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+                <button
+                  onClick={() => {
+                    setStep('loading');
+                    fetchAnalysis(false);
+                  }}
+                  className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition shadow-lg shadow-indigo-200"
+                >
+                  Yes, Use Gemini
+                </button>
+                <button
+                  onClick={setupManualAnalysis}
+                  className="px-6 py-3 bg-white text-gray-700 border border-gray-300 rounded-xl font-semibold hover:bg-gray-50 transition"
+                >
+                  No, I'll Write Manually
+                </button>
+              </div>
+            </div>
+          )}
+
           {step === 'loading' && (
             <div className="flex flex-col items-center justify-center h-full p-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
@@ -259,11 +382,20 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                   </button>
                 </div>
                 {isCached && (
-                  <div className="mb-6 p-3 bg-blue-50 text-blue-800 rounded-lg flex items-start gap-2 border border-blue-200">
+                  <div className="mb-4 p-3 bg-blue-50 text-blue-800 rounded-lg flex items-start gap-2 border border-blue-200">
                     <span className="text-xl">✨</span>
                     <div>
-                      <p className="font-semibold text-sm">Data loaded from cache</p>
-                      <p className="text-xs">Click "Regenerate AI Content" to re-create the caption and insights from scratch.</p>
+                      <p className="font-semibold text-sm">Gemini pros, cons, and caption were already present!</p>
+                      <p className="text-xs">Loaded from cache. Click "Regenerate AI Content" to re-create the caption and insights from scratch.</p>
+                    </div>
+                  </div>
+                )}
+                {hasExistingImages && (
+                  <div className="mb-6 p-3 bg-green-50 text-green-800 rounded-lg flex items-start gap-2 border border-green-200">
+                    <span className="text-xl">🖼️</span>
+                    <div>
+                      <p className="font-semibold text-sm">Photo edits were already present!</p>
+                      <p className="text-xs">You can proceed with existing images, or recreate them to pick up any new edits you make below.</p>
                     </div>
                   </div>
                 )}
@@ -388,15 +520,37 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
           {step === 'preview' && (
             <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-y-hidden">
               <div className="w-full md:w-2/3 p-4 md:overflow-y-auto bg-gray-100 md:border-r border-gray-200">
-                <h3 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Photo Previews</h3>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wider flex justify-between items-center">
+                  <span>Photo & Video Sequence</span>
+                  <span className="text-xs font-normal text-gray-500">
+                    Selected: {previews.filter(p => p.selected).length}/10 Max
+                  </span>
+                </h3>
                 {previews.length === 0 ? (
-                  <div className="text-center text-gray-500 py-12">No images available for publishing.</div>
+                  <div className="text-center text-gray-500 py-12">No media available for publishing.</div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {previews.map((p, index) => (
-                      <div key={index} className="flex flex-col items-center bg-white p-2 rounded shadow">
-                        <span className="text-xs font-semibold mb-2 text-gray-500">Image {index + 1} ({p.type})</span>
-                        <img src={p.url} alt={`Preview ${index}`} className="w-full object-contain rounded" style={{ aspectRatio: '4/5' }} />
+                      <div key={index} className={`flex flex-col relative bg-white p-2 rounded shadow transition-all ${!p.selected ? 'opacity-60 grayscale' : 'ring-2 ring-indigo-500'}`}>
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-xs font-semibold text-gray-600 capitalize">
+                            {index + 1}. {p.type} {p.mediaType === 'video' && '🎥'}
+                          </span>
+                          <input 
+                            type="checkbox" 
+                            checked={p.selected} 
+                            onChange={() => togglePreviewSelection(index)}
+                            disabled={!p.selected && previews.filter(x => x.selected).length >= 10}
+                            className="w-4 h-4 text-indigo-600 rounded cursor-pointer"
+                          />
+                        </div>
+                        {p.mediaType === 'video' ? (
+                          <div className="w-full bg-gray-200 rounded flex items-center justify-center text-xs text-gray-500" style={{ aspectRatio: '4/5' }}>
+                            Video File
+                          </div>
+                        ) : (
+                          <img src={p.url} alt={`Preview ${index}`} className="w-full object-contain rounded" style={{ aspectRatio: '4/5' }} />
+                        )}
                       </div>
                     ))}
                   </div>
@@ -434,11 +588,19 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
               >
                 Cancel
               </button>
+              {hasExistingImages && (
+                <button
+                  onClick={loadExistingImages}
+                  className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 font-medium transition-colors text-sm sm:text-base whitespace-nowrap text-center"
+                >
+                  Use Existing Images &rarr;
+                </button>
+              )}
               <button
                 onClick={generateImages}
                 className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition-colors text-sm sm:text-base whitespace-nowrap text-center"
               >
-                Generate Images &rarr;
+                {hasExistingImages ? 'Recreate Images \u2192' : 'Generate Images \u2192'}
               </button>
             </>
           )}
@@ -475,11 +637,12 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                     restaurantImage: '', 
                     dishImages: {} as Record<string, string>, 
                     caption: captionText,
-                    dishAnalyses: dishAnalysesPayload
+                    dishAnalyses: dishAnalysesPayload,
+                    customMediaSequence: previews.filter(p => p.selected).map(p => ({ url: p.url, type: p.mediaType }))
                   };
                     previews.forEach(p => {
                       if (p.type === 'restaurant') payload.restaurantImage = p.url;
-                      else payload.dishImages[p.id] = p.url;
+                      else if (p.type === 'dish') payload.dishImages[p.id] = p.url;
                     });
                     await onPublish(payload);
                     onClose();
@@ -493,6 +656,38 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium transition-colors text-sm sm:text-base text-center"
               >
                 {isPublishing ? 'Publishing...' : 'Approve & Publish'}
+              </button>
+              <button
+                onClick={() => {
+                  const dishAnalysesPayload = dishes.map(d => {
+                    const analysis = dishAnalyses.get(d.id);
+                    return {
+                      dishId: d.id,
+                      pros: analysis?.pros || [],
+                      cons: analysis?.cons || [],
+                      originalReviews: d.reviews || []
+                    };
+                  });
+                  const payload = { 
+                    restaurantImage: '', 
+                    dishImages: {} as Record<string, string>, 
+                    caption: captionText,
+                    dishAnalyses: dishAnalysesPayload,
+                    customMediaSequence: previews.filter(p => p.selected).map(p => ({ url: p.url, type: p.mediaType }))
+                  };
+                  previews.forEach(p => {
+                    if (p.type === 'restaurant') payload.restaurantImage = p.url;
+                    else if (p.type === 'dish') payload.dishImages[p.id] = p.url;
+                  });
+                  // Fire and forget
+                  onPublish(payload).catch(console.error);
+                  onClose();
+                  navigate('/');
+                }}
+                disabled={isPublishing || previews.length === 0}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 font-medium transition-colors text-sm sm:text-base text-center"
+              >
+                Publish & Go to Map
               </button>
             </div>
           )}

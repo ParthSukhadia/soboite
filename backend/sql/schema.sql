@@ -42,7 +42,10 @@ CREATE TABLE restaurants (
     cost_for_two INTEGER,
     ambience_rating SMALLINT CHECK (ambience_rating >= 1 AND ambience_rating <= 5),
     service_rating SMALLINT CHECK (service_rating >= 1 AND service_rating <= 5),
-    created_at BIGINT NOT NULL DEFAULT extract(epoch from now()) * 1000
+    created_at BIGINT NOT NULL DEFAULT extract(epoch from now()) * 1000,
+    insta_published BOOLEAN DEFAULT FALSE,
+    insta_published_at TIMESTAMPTZ,
+    insta_edited_photo_url TEXT
 );
 
 -- Create Dishes Table
@@ -68,7 +71,10 @@ CREATE TABLE dishes (
     rank INTEGER,
     summary TEXT,
     verdict TEXT,
-    embedding vector(3072)
+    embedding vector(3072),
+    insta_published BOOLEAN DEFAULT FALSE,
+    insta_published_at TIMESTAMPTZ,
+    insta_edited_photo_url TEXT
 );
 
 -- Create Users Table

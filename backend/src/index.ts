@@ -56,7 +56,7 @@ app.get('/api/events', async (c) => {
 // Example: Get all restaurants (replace with your actual schema)
 app.get('/api/restaurants', async (c) => {
   const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, like_count')
+  const { data, error } = await supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, like_count, insta_published, insta_published_at, insta_edited_photo_url')
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data);
 })
@@ -64,7 +64,7 @@ app.get('/api/restaurants', async (c) => {
 // Get all dishes
 app.get('/api/dishes', async (c) => {
   const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('dishes_with_likes').select('id, name, restaurant_id, rating, price_level, actual_price, serves, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, like_count, pros, cons, summary, verdict, rank')
+  const { data, error } = await supabase.from('dishes_with_likes').select('id, name, restaurant_id, rating, price_level, actual_price, serves, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, like_count, pros, cons, summary, verdict, rank, insta_published, insta_published_at, insta_edited_photo_url')
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data);
 })
@@ -294,7 +294,8 @@ Return ONLY a JSON object with 'pros' (array of strings), 'cons' (array of strin
     }
   }
 
-  // Generate embedding if API key is present
+  // DISABLED AUTOMATIC EMBEDDING GENERATION TO SAVE API CALLS
+  /*
   if (apiKey && body.restaurant_id) {
     try {
       const { data: resto } = await supabase.from('restaurants').select('name').eq('id', body.restaurant_id).single();
@@ -306,6 +307,7 @@ Return ONLY a JSON object with 'pros' (array of strings), 'cons' (array of strin
       console.warn("Failed to generate embedding for new dish", err);
     }
   }
+  */
 
   console.log("PAYLOAD TO SUPABASE (dishes):", JSON.stringify(body, null, 2));
 
@@ -329,11 +331,22 @@ app.put('/api/dishes/:id', async (c) => {
     try {
       const { data: existingDish } = await supabase.from('dishes').select('*, restaurants(name)').eq('id', id).single();
       if (existingDish) {
-        const mergedData = { ...existingDish, ...updates };
-        const embedResult = await generateDishEmbedding(apiKey, mergedData, existingDish.restaurants?.name);
-        if (embedResult?.embedding) {
-          updates.embedding = embedResult.embedding;
+        /*
+        // Generate embedding if there are changes to fields that matter
+        const apiKey = (c.env as any).GEMINI_API_KEY;
+        if (apiKey && (updates.name || updates.summary || updates.pros || updates.cons || updates.verdict)) {
+          try {
+            // We need the full dish data to generate a good embedding
+            const mergedData = { ...existingDish, ...updates };
+            const embedResult = await generateDishEmbedding(apiKey, mergedData, existingDish.restaurants?.name);
+            if (embedResult?.embedding) {
+              updates.embedding = embedResult.embedding;
+            }
+          } catch (err) {
+            console.warn("Failed to generate embedding for updated dish", err);
+          }
         }
+        */
       }
     } catch (err) {
       console.warn("Failed to generate embedding for updated dish", err);
@@ -443,6 +456,106 @@ app.get('/api/restaurants/:id/photos', async (c) => {
 
 // Note: getRestaurantPhotos endpoint can be added later.
 
+app.post('/api/restaurants/:id/generate-embeddings', async (c) => {
+  const supabase = getSupabase(c);
+  const id = c.req.param('id');
+  const apiKey = (c.env as any).GEMINI_API_KEY;
+
+  if (!apiKey) {
+    return c.json({ error: 'GEMINI_API_KEY is not configured' }, 500);
+  }
+
+  // 1. Fetch restaurant name
+  const { data: resto, error: restoError } = await supabase
+    .from('restaurants')
+    .select('name')
+    .eq('id', id)
+    .single();
+
+  if (restoError || !resto) {
+    return c.json({ error: 'Restaurant not found' }, 404);
+  }
+
+  // 2. Fetch all dishes for this restaurant
+  const { data: dishes, error: dishesError } = await supabase
+    .from('dishes')
+    .select('*')
+    .eq('restaurant_id', id);
+
+  if (dishesError) {
+    return c.json({ error: 'Failed to fetch dishes' }, 500);
+  }
+
+  if (!dishes || dishes.length === 0) {
+    return c.json({ success: true, message: 'No dishes to generate embeddings for' });
+  }
+
+  let successCount = 0;
+  let failCount = 0;
+
+  // 3. Generate embeddings and update DB
+  for (const dish of dishes) {
+    try {
+      const embedResult = await generateDishEmbedding(apiKey, dish, resto.name);
+      if (embedResult?.embedding) {
+        await supabase
+          .from('dishes')
+          .update({ embedding: embedResult.embedding })
+          .eq('id', dish.id);
+        successCount++;
+      } else {
+        failCount++;
+      }
+    } catch (e) {
+      console.error(`Failed to generate embedding for dish ${dish.id}:`, e);
+      failCount++;
+    }
+  }
+
+  return c.json({ 
+    success: true, 
+    message: `Generated embeddings for ${successCount} dishes. ${failCount} failed.` 
+  });
+});
+
+async function uploadDataUrlToSupabase(supabase: any, dataUrl: string): Promise<string> {
+  if (!dataUrl || !dataUrl.startsWith('data:')) return dataUrl;
+  
+  const [header, base64] = dataUrl.split(',');
+  if (!base64) throw new Error("Invalid dataUrl, missing base64 part");
+  
+  const mimeMatch = header.match(/:(.*?);/);
+  const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const fileExt = mimeType.split('/')[1] || 'jpg';
+
+  // Decode base64 to Uint8Array
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const arrayBuffer = bytes.buffer;
+
+  const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+  const filePath = `uploads/${fileName}`;
+
+  const { error } = await supabase.storage
+    .from('soboite')
+    .upload(filePath, arrayBuffer, {
+      contentType: mimeType,
+    });
+
+  if (error) {
+    throw new Error(`Supabase upload failed: ${error.message || JSON.stringify(error)}`);
+  }
+
+  const { data } = supabase.storage
+    .from('soboite')
+    .getPublicUrl(filePath);
+
+  return data.publicUrl;
+}
+
 // Image upload endpoint
 app.post('/api/upload-image', async (c) => {
   const supabase = getSupabase(c);
@@ -453,40 +566,9 @@ app.post('/api/upload-image', async (c) => {
     return c.json({ error: 'Invalid data URL' }, 400);
   }
 
-  try {
-
-    const [header, base64] = dataUrl.split(',');
-    const mimeMatch = header.match(/:(.*?);/);
-    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-    const fileExt = mimeType.split('/')[1] || 'jpg';
-
-    // Decode base64 to Uint8Array
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    const arrayBuffer = bytes.buffer;
-
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-    const filePath = `uploads/${fileName}`;
-
-    const { error } = await supabase.storage
-      .from('soboite')
-      .upload(filePath, arrayBuffer, {
-        contentType: mimeType,
-      });
-
-    if (error) throw error;
-
-    const { data } = supabase.storage
-      .from('soboite')
-      .getPublicUrl(filePath);
-
-    return c.json({ image_storage_url: data.publicUrl });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
+  const publicUrl = await uploadDataUrlToSupabase(supabase, dataUrl);
+  if (!publicUrl) return c.json({ error: 'Upload failed' }, 500);
+  return c.json({ image_storage_url: publicUrl });
 });
 
 // Admin endpoints
@@ -746,11 +828,17 @@ Return ONLY a JSON object with 'dishes' as an array of objects containing 'id', 
 
           if (originalDish) {
             const mergedData = { ...originalDish, ...updateData };
-            const { data: resto } = await supabase.from('restaurants').select('name').eq('id', originalDish.restaurantId || originalDish.restaurant_id).single();
-            const embedResult = await generateDishEmbedding(apiKey, mergedData, resto?.name);
-            if (embedResult?.embedding) {
-              updateData.embedding = embedResult.embedding;
+            /*
+            const apiKey = (c.env as any).GEMINI_API_KEY;
+            if (apiKey && (updateData.name || updateData.summary || updateData.pros || updateData.cons || updateData.verdict)) {
+              const { data: resto } = await supabase.from('restaurants').select('name').eq('id', updateData.restaurant_id || existing.restaurant_id).single();
+              const mergedData = { ...existing, ...updateData };
+              const embedResult = await generateDishEmbedding(apiKey, mergedData, resto?.name);
+              if (embedResult?.embedding) {
+                updateData.embedding = embedResult.embedding;
+              }
             }
+            */
           }
 
           await supabase.from('dishes').update(updateData).eq('id', d.id);
@@ -1090,10 +1178,23 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
     // Ignore error if body is empty or not JSON
   }
 
-  const restaurantImageUrl = body.restaurantImageUrl;
+  let restaurantImageUrl = body.restaurantImageUrl;
   const dishImageUrls = body.dishImageUrls || {};
   let caption = body.caption;
   const dishAnalyses = body.dishAnalyses || [];
+
+  try {
+    if (restaurantImageUrl && restaurantImageUrl.startsWith('data:')) {
+      restaurantImageUrl = await uploadDataUrlToSupabase(supabase, restaurantImageUrl);
+    }
+    for (const dishId of Object.keys(dishImageUrls)) {
+      if (dishImageUrls[dishId] && dishImageUrls[dishId].startsWith('data:')) {
+        dishImageUrls[dishId] = await uploadDataUrlToSupabase(supabase, dishImageUrls[dishId]);
+      }
+    }
+  } catch (err: any) {
+    return c.json({ error: `Image upload failed: ${err.message}` }, 500);
+  }
 
   const zernioApiKey = (c.env as any).ZERNIO_API_KEY;
   const zernioAccountId = (c.env as any).ZERNIO_ACCOUNT_ID;
@@ -1198,8 +1299,11 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
 
   let mediaToPublish: { url: string; type: string }[] = [];
 
-  // 1. Add Restaurant Cover Photo
-  if (restaurantImageUrl) {
+  if (body.customMediaSequence && Array.isArray(body.customMediaSequence)) {
+    mediaToPublish = body.customMediaSequence;
+  } else {
+    // 1. Add Restaurant Cover Photo
+    if (restaurantImageUrl) {
     mediaToPublish.push({ url: restaurantImageUrl, type: 'image' });
   } else if (restaurant.image_storage_url) {
     mediaToPublish.push({ url: restaurant.image_storage_url, type: 'image' });
@@ -1232,6 +1336,18 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
       }
     });
   }
+}
+
+  // 3. Catch any data URLs that might have come from the database (e.g. dish.photos)
+  try {
+    for (let i = 0; i < mediaToPublish.length; i++) {
+      if (mediaToPublish[i].url && mediaToPublish[i].url.startsWith('data:')) {
+        mediaToPublish[i].url = await uploadDataUrlToSupabase(supabase, mediaToPublish[i].url);
+      }
+    }
+  } catch (err: any) {
+    return c.json({ error: `Image upload failed during media prep: ${err.message}` }, 500);
+  }
 
   // Enforce Instagram's strict 10-item carousel limit
   const finalMediaItems = mediaToPublish.slice(0, 10);
@@ -1263,7 +1379,8 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
     let postData = result.data as any;
     const postId = postData?.id;
 
-    if (postId && postData?.status !== 'failed') {
+    // As long as Zernio didn't return an error, we mark it as published
+    if (postData?.status !== 'failed') {
       // Update restaurant in DB (Optimistic update since we removed polling)
       await supabase.from('restaurants').update({
         insta_published: true,
@@ -1316,7 +1433,14 @@ app.post('/api/top-picks/publish-instagram', async (c) => {
     body = await c.req.json();
   } catch (e) { }
 
-  const imageUrl = body.imageUrl;
+  let imageUrl = body.imageUrl;
+  try {
+    if (imageUrl && imageUrl.startsWith('data:')) {
+      imageUrl = await uploadDataUrlToSupabase(supabase, imageUrl);
+    }
+  } catch (err: any) {
+    return c.json({ error: `Image upload failed: ${err.message}` }, 500);
+  }
   const caption = body.caption;
 
   const zernioApiKey = (c.env as any).ZERNIO_API_KEY;
