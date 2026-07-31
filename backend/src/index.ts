@@ -914,7 +914,8 @@ app.get('/api/users/:device_id/likes', async (c) => {
     .eq('device_id', deviceId)
     .maybeSingle();
 
-  if (userError || !user) return c.json({ error: userError?.message || 'User not found' }, 404);
+  if (userError) return c.json({ error: userError.message }, 500);
+  if (!user) return c.json({ restaurants: [], dishes: [] });
 
   const { data: restLikes, error: restError } = await supabase
     .from('restaurant_likes')
@@ -1199,11 +1200,11 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
 
   // 1. Add Restaurant Cover Photo
   if (restaurantImageUrl) {
-    mediaToPublish.push({ url: restaurantImageUrl, type: 'IMAGE' });
+    mediaToPublish.push({ url: restaurantImageUrl, type: 'image' });
   } else if (restaurant.image_storage_url) {
-    mediaToPublish.push({ url: restaurant.image_storage_url, type: 'IMAGE' });
+    mediaToPublish.push({ url: restaurant.image_storage_url, type: 'image' });
   } else if (restaurant.photos && restaurant.photos.length > 0) {
-    mediaToPublish.push({ url: restaurant.photos[0].url, type: restaurant.photos[0].type || 'IMAGE' });
+    mediaToPublish.push({ url: restaurant.photos[0].url, type: (restaurant.photos[0].type || 'image').toLowerCase() });
   }
 
   // 2. Add Dish Photos and Videos
@@ -1211,22 +1212,22 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
     dishes.forEach(dish => {
       // If there's an edited Info Card for this dish, add it first
       if (dishImageUrls && dishImageUrls[dish.id]) {
-        mediaToPublish.push({ url: dishImageUrls[dish.id], type: 'IMAGE' });
+        mediaToPublish.push({ url: dishImageUrls[dish.id], type: 'image' });
 
         // Then add the remaining raw media for this dish as B-Roll (skip index 0 as it was the base for Info Card)
         if (dish.photos && dish.photos.length > 1) {
           const rawMedia = dish.photos.slice(1);
           rawMedia.forEach((media: any) => {
-            mediaToPublish.push({ url: media.url, type: media.type || 'IMAGE' });
+            mediaToPublish.push({ url: media.url, type: (media.type || 'image').toLowerCase() });
           });
         }
       } else if (dish.image_storage_url) {
         // Fallback: No edited image, just use storage URL
-        mediaToPublish.push({ url: dish.image_storage_url, type: 'IMAGE' });
+        mediaToPublish.push({ url: dish.image_storage_url, type: 'image' });
       } else if (dish.photos && dish.photos.length > 0) {
         // Fallback: No edited image, use all raw photos/videos for this dish
         dish.photos.forEach((media: any) => {
-          mediaToPublish.push({ url: media.url, type: media.type || 'IMAGE' });
+          mediaToPublish.push({ url: media.url, type: (media.type || 'image').toLowerCase() });
         });
       }
     });
