@@ -213,6 +213,7 @@ export default function RestaurantDetails() {
   const [likesModal, setLikesModal] = useState<{ isOpen: boolean; type: 'restaurant' | 'dish'; id: string } | null>(null);
   const [likesList, setLikesList] = useState<string[]>([]);
   const [isLoadingLikes, setIsLoadingLikes] = useState(false);
+  const [floatingEmojis, setFloatingEmojis] = useState<{ id: number; emoji: string; optionId: number }[]>([]);
 
   const { addToast } = useToast();
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; isDestructive: boolean; action: (() => Promise<void> | void) | null }>({
@@ -1597,10 +1598,10 @@ export default function RestaurantDetails() {
             <p className="text-sm font-bold text-gray-800 mb-3 text-center">What do you think about this resto?</p>
             <div className="grid grid-cols-2 gap-2">
               {[
-                { id: 1, label: 'Ek number hai!', color: 'green', classes: 'bg-green-100 text-green-700 border-green-300 ring-green-400', hoverClasses: 'hover:bg-green-50' },
-                { id: 2, label: 'Theeek hai..', color: 'amber', classes: 'bg-amber-100 text-amber-700 border-amber-300 ring-amber-400', hoverClasses: 'hover:bg-amber-50' },
-                { id: 3, label: 'Maja nai aya..', color: 'red', classes: 'bg-red-100 text-red-700 border-red-300 ring-red-400', hoverClasses: 'hover:bg-red-50' },
-                { id: 4, label: 'Jana hai kabhi.', color: 'blue', classes: 'bg-blue-100 text-blue-700 border-blue-300 ring-blue-400', hoverClasses: 'hover:bg-blue-50' },
+                { id: 1, label: 'Ek number hai!', emoji: '🤩', color: 'green', classes: 'bg-green-50 text-green-300 border-green-200 hover:bg-green-100 ring-green-400', selectedClasses: 'bg-green-100 text-green-800 border-green-400 ring-2' },
+                { id: 2, label: 'Theeek hai..', emoji: '🙂', color: 'amber', classes: 'bg-amber-50 text-amber-300 border-amber-200 hover:bg-amber-100 ring-amber-400', selectedClasses: 'bg-amber-100 text-amber-800 border-amber-400 ring-2' },
+                { id: 3, label: 'Maja nai aya..', emoji: '😒', color: 'red', classes: 'bg-red-50 text-red-300 border-red-200 hover:bg-red-100 ring-red-400', selectedClasses: 'bg-red-100 text-red-800 border-red-400 ring-2' },
+                { id: 4, label: 'Jana hai kabhi.', emoji: '🤔', color: 'blue', classes: 'bg-blue-50 text-blue-300 border-blue-200 hover:bg-blue-100 ring-blue-400', selectedClasses: 'bg-blue-100 text-blue-800 border-blue-400 ring-2' },
               ].map(option => {
                 const isSelected = restaurantPolls[restaurant.id] === option.id;
                 
@@ -1612,19 +1613,33 @@ export default function RestaurantDetails() {
                 
                 // Optimistic UI updates
                 if (isSelected && pollCount === 0) pollCount = 1;
-
+                
                 return (
                   <button
                     key={option.id}
-                    onClick={() => setRestaurantPoll(restaurant.id, isSelected ? null : option.id)}
-                    className={`p-2 rounded-lg border text-sm transition font-medium flex flex-col items-center justify-center gap-1 ${
+                    onClick={() => {
+                      setRestaurantPoll(restaurant.id, isSelected ? null : option.id);
+                      if (!isSelected) {
+                        const newId = Date.now();
+                        setFloatingEmojis(prev => [...prev, { id: newId, emoji: option.emoji, optionId: option.id }]);
+                        setTimeout(() => {
+                          setFloatingEmojis(prev => prev.filter(e => e.id !== newId));
+                        }, 800);
+                      }
+                    }}
+                    className={`relative p-2.5 rounded-xl border text-sm transition-all font-semibold flex flex-col items-center justify-center gap-1 cursor-pointer ${
                       isSelected
-                        ? `${option.classes} ring-2`
-                        : `bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100`
+                        ? option.selectedClasses
+                        : option.classes
                     }`}
                   >
                     <span>{option.label}</span>
-                    {pollCount > 0 && <span className="text-xs opacity-75">{pollCount} selected</span>}
+                    {pollCount > 0 && <span className="text-[11px] font-medium opacity-80">{pollCount} {pollCount === 1 ? 'foodie' : 'foodies'}</span>}
+                    {floatingEmojis.map(e => (
+                      e.optionId === option.id && (
+                        <span key={e.id} className="absolute left-1/2 bottom-full emoji-pop text-2xl z-10">{e.emoji}</span>
+                      )
+                    ))}
                   </button>
                 );
               })}

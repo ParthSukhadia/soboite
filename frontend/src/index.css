@@ -213,3 +213,11 @@ html, body, #root {
   filter: brightness(0.85) contrast(1.1);
 }
 
+
+@keyframes emojiPop {
+  0% { transform: translate(-50%, 0) scale(0.5); opacity: 1; }
+  100% { transform: translate(-50%, -40px) scale(1.5); opacity: 0; }
+}
+.emoji-pop {
+  animation: emojiPop 0.8s ease-out forwards;
+}

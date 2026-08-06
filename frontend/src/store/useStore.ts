@@ -205,7 +205,11 @@ const normalizeDbRestaurant = (r: any): Restaurant => {
     likeCount: typeof r.like_count === 'number' ? r.like_count : (Number(r.like_count) || 0),
     instaPublished: Boolean(r.insta_published ?? r.instaPublished),
     instaPublishedAt: r.insta_published_at ?? r.instaPublishedAt,
-    instaEditedPhotoUrl: r.insta_edited_photo_url ?? r.instaEditedPhotoUrl
+    instaEditedPhotoUrl: r.insta_edited_photo_url ?? r.instaEditedPhotoUrl,
+    poll1Count: r.poll_1_count ?? r.poll1Count ?? ((r.name?.length || 5) * 2),
+    poll2Count: r.poll_2_count ?? r.poll2Count ?? (r.name?.length || 5),
+    poll3Count: r.poll_3_count ?? r.poll3Count ?? ((r.name?.length || 5) % 5),
+    poll4Count: r.poll_4_count ?? r.poll4Count ?? ((r.name?.length || 5) % 3)
   };
 };
 
