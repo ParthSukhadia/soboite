@@ -248,6 +248,7 @@ app.post('/api/dishes', async (c) => {
   let body = normalizeRequestBody(await c.req.json())
 
   // Generate pros and cons via Gemini straight at the time of creating the dish
+  /*
   const apiKey = (c.env as any).GEMINI_API_KEY || process.env.GEMINI_API_KEY;
   if (apiKey && (!body.pros || !body.cons) && (body.name || body.review || body.reviews)) {
     try {
@@ -293,6 +294,7 @@ Return ONLY a JSON object with 'pros' (array of strings), 'cons' (array of strin
       console.warn('Could not generate Gemini insights during dish creation:', err);
     }
   }
+  */
 
   // DISABLED AUTOMATIC EMBEDDING GENERATION TO SAVE API CALLS
   /*

@@ -483,6 +483,7 @@ export default function RestaurantDetails() {
 
   const [isGeneratingMissingInsights, setIsGeneratingMissingInsights] = useState(false);
 
+  /*
   useEffect(() => {
     // Check if we have dishes and are not already generating
     if (!id || restaurantDishes.length === 0 || isGeneratingMissingInsights) return;
@@ -525,6 +526,7 @@ export default function RestaurantDetails() {
       };
     }
   }, [id, restaurantDishes, isGeneratingMissingInsights, updateDish]);
+  */
 
   // Keep batch-entry rows in sync with selected photos.
   useEffect(() => {
