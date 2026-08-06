@@ -5,7 +5,7 @@ import CachedImage from '../components/CachedImage';
 import { getCuisineColor } from '../lib/instagramProcessing';
 
 export default function WishlistPage() {
-  const { wishlist, restaurants } = useStore();
+  const { restaurants, wishlist, dishes } = useStore();
 
   const wishlistRestaurants = restaurants.filter((r) => wishlist.includes(r.id));
 
@@ -34,6 +34,11 @@ export default function WishlistPage() {
             const primaryPhoto = r.photos?.find((p) => p.id === r.primaryPhotoId) || r.photos?.[0];
             const imgUrl = r.imageStorageUrl || primaryPhoto?.url;
             const cuisineColor = getCuisineColor(r.cuisine);
+            
+            const rDishes = dishes.filter(d => d.restaurantId === r.id);
+            const dishAvg = rDishes.length > 0 ? rDishes.reduce((acc, d) => acc + d.rating, 0) / rDishes.length : undefined;
+            const validRatings = [r.ambienceRating, r.serviceRating, dishAvg].filter((val): val is number => typeof val === 'number');
+            const rRating = validRatings.length > 0 ? validRatings.reduce((acc, val) => acc + val, 0) / validRatings.length : undefined;
 
             return (
               <Link key={r.id} to={`/restaurant/${r.id}`} className="group relative block bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition">
@@ -45,7 +50,7 @@ export default function WishlistPage() {
                   )}
                   <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm px-2.5 py-1 rounded-full flex items-center gap-1 shadow-sm">
                     <Star size={14} className="text-yellow-500 fill-current" />
-                    <span className="text-sm font-bold text-gray-900">{r.rating ? r.rating.toFixed(1) : 'New'}</span>
+                    <span className="text-sm font-bold text-gray-900">{rRating !== undefined ? rRating.toFixed(1) : 'New'}</span>
                   </div>
                 </div>
                 <div className="p-5">

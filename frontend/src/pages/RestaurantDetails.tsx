@@ -201,9 +201,7 @@ export default function RestaurantDetails() {
     deleteRestaurant,
     ensureCuisine,
     ensureFlavorTag,
-    restaurantLikes,
     dishLikes,
-    toggleRestaurantLike,
     toggleDishLike,
     restaurantPolls,
     setRestaurantPoll,
@@ -230,7 +228,7 @@ export default function RestaurantDetails() {
     setIsLoadingLikes(true);
     setLikesList([]);
     try {
-      const data = type === 'restaurant' ? await api.getRestaurantLikes(targetId) : await api.getDishLikes(targetId);
+      const data = await api.getDishLikes(targetId);
       setLikesList(data.names);
     } catch (error) {
       console.error(error);
@@ -481,7 +479,6 @@ export default function RestaurantDetails() {
     };
   }, [id, needsPhotoFetch, fetchRestaurantPhotos]);
 
-  const [isGeneratingMissingInsights, setIsGeneratingMissingInsights] = useState(false);
 
   /*
   useEffect(() => {
