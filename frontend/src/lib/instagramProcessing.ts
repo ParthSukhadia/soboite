@@ -217,9 +217,9 @@ export const processInstagramImage = async (
   if (type === 'dish' && analysis) {
     // --- DRAW BOTTOM DISH OVERLAY ---
     const boxX = 40;
-    const boxY = CANVAS_HEIGHT - 440;
+    const boxH = 300;
+    const boxY = CANVAS_HEIGHT - 340;
     const boxW = CANVAS_WIDTH - 80;
-    const boxH = 400;
 
     ctx.fillStyle = 'rgba(15, 15, 15, 0.85)';
     drawRoundedRect(ctx, boxX, boxY, boxW, boxH, 24);
@@ -270,7 +270,7 @@ export const processInstagramImage = async (
     // Divider line between columns
     ctx.beginPath();
     ctx.moveTo(rightColX - 40, boxY + 40);
-    ctx.lineTo(rightColX - 40, boxY + boxH - 120);
+    ctx.lineTo(rightColX - 40, boxY + boxH - 40); // Extended to bottom
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
     ctx.stroke();
 
@@ -328,11 +328,7 @@ export const processInstagramImage = async (
       // nextY += 40; // not strictly needed since it's the last item, but good practice
     }
 
-    // Divider for bottom row
-    ctx.beginPath();
-    ctx.moveTo(boxX + 40, boxY + boxH - 100);
-    ctx.lineTo(boxX + boxW - 40, boxY + boxH - 100);
-    ctx.stroke();
+
 
     // Bottom Row
     const btmY = boxY + boxH - 50;
@@ -346,20 +342,10 @@ export const processInstagramImage = async (
       ctx.fillText(locName, leftColX + 40, btmY);
     }
 
-
-
-    // Cuisine
-    ctx.textAlign = 'right';
-    const cuisineX = boxX + boxW - 40;
-    ctx.fillStyle = '#d1d5db';
-    ctx.fillText(cuisineName, cuisineX, btmY);
-    ctx.fillStyle = '#22c55e'; // Green dot
-    ctx.fillText("🟢 ", cuisineX - ctx.measureText(cuisineName).width - 10, btmY);
-
     if (analysis.rank) {
-      // Position inside the rectangle, bottom left
-      const badgeX = boxX + 150;
-      const badgeY = boxY + boxH - 85;
+      // Position inside the rectangle, bottom right
+      const badgeX = boxX + boxW - 80;
+      const badgeY = boxY + boxH - 70;
       
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';

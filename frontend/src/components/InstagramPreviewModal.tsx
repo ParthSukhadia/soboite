@@ -15,6 +15,15 @@ interface InstagramPreviewModalProps {
 
 type Step = 'choose_generation' | 'loading' | 'review' | 'generating' | 'preview';
 
+const getMediaType = (media: any): 'image'|'video' => {
+  if (media.type === 'video') return 'video';
+  if (typeof media.url === 'string') {
+    if (media.url.startsWith('data:video/')) return 'video';
+    if (media.url.match(/\.(mp4|mov|webm)(\?.*)?$/i)) return 'video';
+  }
+  return 'image';
+};
+
 export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
   isOpen,
   onClose,
@@ -133,19 +142,30 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
 
       // Process Restaurant Image
       let restaurantDataUrl: string | undefined;
+      let addedEditedResto = false;
       try {
         const dishAverage = dishes.length > 0 ? (dishes.reduce((sum, d) => sum + (d.rating || 0), 0) / dishes.length) : 0;
         const validRatings = [restaurant.ambienceRating, restaurant.serviceRating, dishAverage].filter(r => typeof r === 'number' && r > 0) as number[];
         const overallRating = validRatings.length > 0 ? (validRatings.reduce((a, b) => a + b, 0) / validRatings.length).toFixed(1) : undefined;
         restaurantDataUrl = await processInstagramImage(restaurant, 'restaurant', { overallRating });
         addMedia({ type: 'restaurant', mediaType: 'image', id: restaurant.id, url: restaurantDataUrl });
+        addedEditedResto = true;
       } catch (e) {
         console.warn("Could not generate restaurant image:", e);
-        if (restaurant.imageStorageUrl) {
-          addMedia({ type: 'restaurant', mediaType: 'image', id: `rest-raw`, url: restaurant.imageStorageUrl });
-        } else if (restaurant.photos && restaurant.photos.length > 0) {
-          addMedia({ type: 'restaurant', mediaType: (restaurant.photos[0].type || 'image') as 'image'|'video', id: `rest-raw`, url: restaurant.photos[0].url });
+      }
+
+      if (addedEditedResto) {
+        if (restaurant.photos && restaurant.photos.length > 1) {
+          restaurant.photos.slice(1).forEach((media, idx) => {
+            addMedia({ type: 'b-roll', mediaType: getMediaType(media), id: `rest-raw-${idx}`, url: media.url });
+          });
         }
+      } else if (restaurant.photos && restaurant.photos.length > 0) {
+        restaurant.photos.forEach((media, idx) => {
+          addMedia({ type: idx === 0 ? 'restaurant' : 'b-roll', mediaType: getMediaType(media), id: `rest-raw-${idx}`, url: media.url });
+        });
+      } else if (restaurant.imageStorageUrl) {
+        addMedia({ type: 'restaurant', mediaType: 'image', id: `rest-raw`, url: restaurant.imageStorageUrl });
       }
 
       // Process Dish Images
@@ -169,15 +189,15 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
         if (addedEdited) {
           if (dish.photos && dish.photos.length > 1) {
             dish.photos.slice(1).forEach((media, idx) => {
-               addMedia({ type: 'b-roll', mediaType: (media.type || 'image') as 'image'|'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+               addMedia({ type: 'b-roll', mediaType: getMediaType(media), id: `dish-${dish.id}-raw-${idx}`, url: media.url });
             });
           }
-        } else if (dish.imageStorageUrl) {
-          addMedia({ type: 'b-roll', mediaType: 'image', id: `dish-${dish.id}-raw`, url: dish.imageStorageUrl });
         } else if (dish.photos && dish.photos.length > 0) {
           dish.photos.forEach((media, idx) => {
-             addMedia({ type: 'b-roll', mediaType: (media.type || 'image') as 'image'|'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+             addMedia({ type: idx === 0 ? 'dish' : 'b-roll', mediaType: getMediaType(media), id: `dish-${dish.id}-raw-${idx}`, url: media.url });
           });
+        } else if (dish.imageStorageUrl) {
+          addMedia({ type: 'b-roll', mediaType: 'image', id: `dish-${dish.id}-raw`, url: dish.imageStorageUrl });
         }
       }
       
@@ -200,12 +220,24 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
       fullSequence.push({ ...item, selected });
     };
 
+    let addedEditedResto = false;
     if (restaurant.instaEditedPhotoUrl) {
       addMedia({ type: 'restaurant', mediaType: 'image', id: restaurant.id, url: restaurant.instaEditedPhotoUrl });
+      addedEditedResto = true;
+    }
+    
+    if (addedEditedResto) {
+      if (restaurant.photos && restaurant.photos.length > 1) {
+        restaurant.photos.slice(1).forEach((media, idx) => {
+          addMedia({ type: 'b-roll', mediaType: getMediaType(media), id: `rest-raw-${idx}`, url: media.url });
+        });
+      }
+    } else if (restaurant.photos && restaurant.photos.length > 0) {
+      restaurant.photos.forEach((media, idx) => {
+        addMedia({ type: idx === 0 ? 'restaurant' : 'b-roll', mediaType: getMediaType(media), id: `rest-raw-${idx}`, url: media.url });
+      });
     } else if (restaurant.imageStorageUrl) {
       addMedia({ type: 'restaurant', mediaType: 'image', id: `rest-raw`, url: restaurant.imageStorageUrl });
-    } else if (restaurant.photos && restaurant.photos.length > 0) {
-      addMedia({ type: 'restaurant', mediaType: (restaurant.photos[0].type || 'image') as 'image'|'video', id: `rest-raw`, url: restaurant.photos[0].url });
     }
     
     const sortedDishes = [...dishes].sort((a, b) => {
@@ -224,15 +256,15 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
       if (addedEdited) {
         if (dish.photos && dish.photos.length > 1) {
           dish.photos.slice(1).forEach((media, idx) => {
-            addMedia({ type: 'b-roll', mediaType: (media.type || 'image') as 'image'|'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+            addMedia({ type: 'b-roll', mediaType: getMediaType(media), id: `dish-${dish.id}-raw-${idx}`, url: media.url });
           });
         }
-      } else if (dish.imageStorageUrl) {
-        addMedia({ type: 'b-roll', mediaType: 'image', id: `dish-${dish.id}-raw`, url: dish.imageStorageUrl });
       } else if (dish.photos && dish.photos.length > 0) {
         dish.photos.forEach((media, idx) => {
-          addMedia({ type: 'b-roll', mediaType: (media.type || 'image') as 'image'|'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+          addMedia({ type: idx === 0 ? 'dish' : 'b-roll', mediaType: getMediaType(media), id: `dish-${dish.id}-raw-${idx}`, url: media.url });
         });
+      } else if (dish.imageStorageUrl) {
+        addMedia({ type: 'b-roll', mediaType: 'image', id: `dish-${dish.id}-raw`, url: dish.imageStorageUrl });
       }
     }
     
@@ -545,9 +577,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                           />
                         </div>
                         {p.mediaType === 'video' ? (
-                          <div className="w-full bg-gray-200 rounded flex items-center justify-center text-xs text-gray-500" style={{ aspectRatio: '4/5' }}>
-                            Video File
-                          </div>
+                          <video src={p.url} controls autoPlay muted loop playsInline preload="metadata" className="w-full object-contain rounded bg-black" style={{ aspectRatio: '4/5' }} />
                         ) : (
                           <img src={p.url} alt={`Preview ${index}`} className="w-full object-contain rounded" style={{ aspectRatio: '4/5' }} />
                         )}

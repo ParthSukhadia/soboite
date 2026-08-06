@@ -18,7 +18,8 @@ import {
   Bell,
   Camera,
   Merge,
-  Copy
+  Copy,
+  Bookmark
 } from "lucide-react";
 import { useForm as useRHForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -204,6 +205,10 @@ export default function RestaurantDetails() {
     dishLikes,
     toggleRestaurantLike,
     toggleDishLike,
+    restaurantPolls,
+    setRestaurantPoll,
+    wishlist,
+    toggleWishlist,
     deviceId
   } = useStore();
 
@@ -818,12 +823,22 @@ export default function RestaurantDetails() {
           uploadedDishUrls[dishId] = await api.uploadImage(dataUrl);
         }
       }
+
+      const customMediaSequence = payload.customMediaSequence ? [...payload.customMediaSequence] : undefined;
+      if (customMediaSequence) {
+        for (let i = 0; i < customMediaSequence.length; i++) {
+          if (customMediaSequence[i].url.startsWith('data:')) {
+            customMediaSequence[i].url = await api.uploadImage(customMediaSequence[i].url);
+          }
+        }
+      }
       
       const structuredPayload = {
         restaurantImageUrl: uploadedRestaurantUrl,
         dishImageUrls: uploadedDishUrls,
         caption: payload.caption,
-        dishAnalyses: payload.dishAnalyses
+        dishAnalyses: payload.dishAnalyses,
+        customMediaSequence
       };
 
       const res = await api.publishToInstagram(restaurant.id, structuredPayload);
@@ -1370,35 +1385,7 @@ export default function RestaurantDetails() {
             )}
           </button>
         )}
-        {deviceId && (
-          <div className="flex flex-col items-start gap-1 shrink-0 mb-3">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => toggleRestaurantLike(restaurant.id, restaurantLikes[restaurant.id] === true ? null : true)}
-                className={`p-2 rounded-full border transition ${restaurantLikes[restaurant.id] === true ? 'bg-green-100 text-green-700 border-green-300' : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'}`}
-                title="Like"
-              >
-                <ThumbsUp size={16} fill={restaurantLikes[restaurant.id] === true ? 'currentColor' : 'none'} />
-              </button>
-              <button
-                onClick={() => toggleRestaurantLike(restaurant.id, restaurantLikes[restaurant.id] === false ? null : false)}
-                className={`p-2 rounded-full border transition ${restaurantLikes[restaurant.id] === false ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'}`}
-                title="Dislike"
-              >
-                <ThumbsDown size={16} fill={restaurantLikes[restaurant.id] === false ? 'currentColor' : 'none'} />
-              </button>
-            </div>
-            {getLikeText(restaurantLikes[restaurant.id], restaurant.likeCount || 0) && (
-              <button
-                disabled={!editMode || (restaurant.likeCount || 0) === 0}
-                onClick={() => openLikesList(restaurant.id, 'restaurant')}
-                className={`text-[11px] text-gray-500 font-medium ${editMode && (restaurant.likeCount || 0) > 0 ? 'hover:text-blue-500 hover:underline cursor-pointer' : ''} text-left`}
-              >
-                {getLikeText(restaurantLikes[restaurant.id], restaurant.likeCount || 0)}
-              </button>
-            )}
-          </div>
-        )}
+
         <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
           <h1 className="text-3xl font-extrabold text-gray-900 pr-4">
             {restaurant.name}
@@ -1487,7 +1474,7 @@ export default function RestaurantDetails() {
         )}
 
         {/* Quick-action links — always visible */}
-        <div className="mt-4 flex flex-wrap gap-2 items-center">
+        <div className="mt-4 grid grid-cols-2 gap-2">
           <a
             id="btn-get-directions"
             href={(() => {
@@ -1498,23 +1485,21 @@ export default function RestaurantDetails() {
             })()}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors font-medium"
+            className="inline-flex justify-center items-center gap-2 px-3 py-2 text-sm rounded-xl border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors font-medium text-center"
           >
             <MapIcon size={14} />
-            Get Directions
+            Directions
           </a>
           <a
             id="btn-search-zomato"
             href={`https://www.zomato.com/search?q=${encodeURIComponent(restaurant.name)}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors font-medium"
+            className="inline-flex justify-center items-center gap-2 px-3 py-2 text-sm rounded-xl border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors font-medium text-center"
           >
             <ExternalLink size={14} />
-            Search on Zomato
+            Zomato
           </a>
-
-
         </div>
 
         {editMode && (
@@ -1531,7 +1516,7 @@ export default function RestaurantDetails() {
           </div>
         )}
 
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="mt-4 grid grid-cols-2 gap-4">
           <div>
             <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase mb-1">
               Ambience
@@ -1594,6 +1579,61 @@ export default function RestaurantDetails() {
           </div>
         )}
       </div>
+
+      {deviceId && (
+        <div className="flex flex-col gap-3 mb-8">
+          <button
+            onClick={() => toggleWishlist(restaurant.id)}
+            className={`w-full flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition font-bold ${
+              wishlist.includes(restaurant.id)
+                ? 'bg-amber-100 border-amber-400 text-amber-700 hover:bg-amber-200'
+                : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <Bookmark size={20} className={wishlist.includes(restaurant.id) ? "fill-current" : ""} />
+            {wishlist.includes(restaurant.id) ? "Remove from Wishlist" : "Add to Wishlist"}
+          </button>
+
+          <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+            <p className="text-sm font-bold text-gray-800 mb-3 text-center">What do you think about this resto?</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 1, label: 'Ek number hai!', color: 'green', classes: 'bg-green-100 text-green-700 border-green-300 ring-green-400', hoverClasses: 'hover:bg-green-50' },
+                { id: 2, label: 'Theeek hai..', color: 'amber', classes: 'bg-amber-100 text-amber-700 border-amber-300 ring-amber-400', hoverClasses: 'hover:bg-amber-50' },
+                { id: 3, label: 'Maja nai aya..', color: 'red', classes: 'bg-red-100 text-red-700 border-red-300 ring-red-400', hoverClasses: 'hover:bg-red-50' },
+                { id: 4, label: 'Jana hai kabhi.', color: 'blue', classes: 'bg-blue-100 text-blue-700 border-blue-300 ring-blue-400', hoverClasses: 'hover:bg-blue-50' },
+              ].map(option => {
+                const isSelected = restaurantPolls[restaurant.id] === option.id;
+                
+                let pollCount = 0;
+                if (option.id === 1) pollCount = restaurant.poll1Count || 0;
+                if (option.id === 2) pollCount = restaurant.poll2Count || 0;
+                if (option.id === 3) pollCount = restaurant.poll3Count || 0;
+                if (option.id === 4) pollCount = restaurant.poll4Count || 0;
+                
+                // Optimistic UI updates
+                if (isSelected && pollCount === 0) pollCount = 1;
+
+                return (
+                  <button
+                    key={option.id}
+                    onClick={() => setRestaurantPoll(restaurant.id, isSelected ? null : option.id)}
+                    className={`p-2 rounded-lg border text-sm transition font-medium flex flex-col items-center justify-center gap-1 ${
+                      isSelected
+                        ? `${option.classes} ring-2`
+                        : `bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100`
+                    }`}
+                  >
+                    <span>{option.label}</span>
+                    {pollCount > 0 && <span className="text-xs opacity-75">{pollCount} selected</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
 
       <div className="flex items-center justify-between mb-4 px-2">
         <h2 className="text-xl font-bold flex items-center gap-2">

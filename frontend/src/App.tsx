@@ -5,6 +5,7 @@ import RestaurantDetails from './pages/RestaurantDetails';
 import RestaurantFormPage from './pages/RestaurantFormPage';
 import RecommendedDishesPage from './pages/RecommendedDishesPage';
 import TopPicksPage from './pages/TopPicksPage';
+import WishlistPage from './pages/WishlistPage';
 import { useStore } from './store/useStore';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider, useToast } from './components/Toast';
@@ -58,6 +59,7 @@ export default function App() {
             <Route path="/" element={<MapPage />} />
             <Route path="/recommended" element={<RecommendedDishesPage />} />
             <Route path="/top-picks" element={<TopPicksPage />} />
+            <Route path="/wishlist" element={<WishlistPage />} />
             <Route path="/restaurant/new" element={<ProtectedRoute><RestaurantFormPage /></ProtectedRoute>} />
             <Route path="/restaurant/:id/edit" element={<ProtectedRoute><RestaurantFormPage /></ProtectedRoute>} />
             <Route path="/restaurant/:id" element={<RestaurantDetails />} />

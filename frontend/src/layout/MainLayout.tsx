@@ -97,7 +97,8 @@ export default function MainLayout() {
     restaurants,
     dishes,
     updateRestaurant,
-    updateDish
+    updateDish,
+    wishlist
   } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
@@ -543,6 +544,13 @@ export default function MainLayout() {
             >
               Top picks
             </Link>
+            <Link
+              to="/wishlist"
+              className={`rounded-full px-3 py-2 text-sm font-semibold relative flex items-center gap-1.5 ${currentPath === '/wishlist' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-200'}`}
+            >
+              Wishlist
+              {wishlist.length > 0 && <span className="w-2 h-2 bg-red-500 rounded-full shadow-sm" />}
+            </Link>
           </div>
           <div className="flex items-center gap-2 sm:hidden">
             <div className="relative">
@@ -561,10 +569,11 @@ export default function MainLayout() {
             <button
               type="button"
               onClick={() => setShowMobileMenu(true)}
-              className="inline-flex items-center justify-center rounded-xl bg-transparent p-2 text-gray-700 hover:bg-gray-100"
+              className="inline-flex items-center justify-center rounded-xl bg-transparent p-2 text-gray-700 hover:bg-gray-100 relative"
               aria-label="Open menu"
             >
-              <Menu size={18} />
+              <Menu size={24} />
+              {wishlist.length > 0 && <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full shadow-sm" />}
             </button>
           </div>
         </div>
@@ -794,6 +803,14 @@ export default function MainLayout() {
                 className={`block rounded-2xl px-4 py-3 text-sm font-semibold ${currentPath === '/top-picks' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-100'}`}
               >
                 Top picks
+              </Link>
+              <Link
+                to="/wishlist"
+                onClick={() => setShowMobileMenu(false)}
+                className={`block rounded-2xl px-4 py-3 text-sm font-semibold relative flex items-center justify-between ${currentPath === '/wishlist' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+              >
+                Wishlist
+                {wishlist.length > 0 && <span className="w-2 h-2 bg-red-500 rounded-full shadow-sm" />}
               </Link>
             </nav>
 

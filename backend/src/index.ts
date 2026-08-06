@@ -56,7 +56,7 @@ app.get('/api/events', async (c) => {
 // Example: Get all restaurants (replace with your actual schema)
 app.get('/api/restaurants', async (c) => {
   const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, like_count, insta_published, insta_published_at, insta_edited_photo_url')
+  const { data, error } = await supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, insta_published, insta_published_at, insta_edited_photo_url, poll_1_count, poll_2_count, poll_3_count, poll_4_count')
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data);
 })
@@ -1003,7 +1003,7 @@ app.get('/api/users/:device_id/likes', async (c) => {
     .maybeSingle();
 
   if (userError) return c.json({ error: userError.message }, 500);
-  if (!user) return c.json({ restaurants: [], dishes: [] });
+  if (!user) return c.json({ restaurants: [], dishes: [], wishlist: [], polls: [] });
 
   const { data: restLikes, error: restError } = await supabase
     .from('restaurant_likes')
@@ -1019,45 +1019,29 @@ app.get('/api/users/:device_id/likes', async (c) => {
 
   if (dishError) return c.json({ error: dishError.message }, 500);
 
-  return c.json({
-    restaurants: restLikes,
-    dishes: dishLikes
+  const { data: wishlist, error: wishlistError } = await supabase
+    .from('wishlists')
+    .select('restaurant_id')
+    .eq('user_id', user.id);
+
+  if (wishlistError) return c.json({ error: wishlistError.message }, 500);
+
+  const { data: polls, error: pollsError } = await supabase
+    .from('restaurant_polls')
+    .select('restaurant_id, option_id')
+    .eq('user_id', user.id);
+
+  if (pollsError) return c.json({ error: pollsError.message }, 500);
+
+  return c.json({ 
+    restaurants: restLikes, 
+    dishes: dishLikes, 
+    wishlist: wishlist, 
+    polls: polls 
   });
 });
 
-app.post('/api/restaurants/:id/like', async (c) => {
-  const supabase = getSupabase(c);
-  const restaurantId = c.req.param('id');
-  const { deviceId, isLike } = await c.req.json();
 
-  if (!deviceId || (typeof isLike !== 'boolean' && isLike !== null)) return c.json({ error: 'Missing fields' }, 400);
-
-  const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('id')
-    .eq('device_id', deviceId)
-    .maybeSingle();
-
-  if (userError || !user) return c.json({ error: 'User not found' }, 404);
-
-  if (isLike === null) {
-    const { error } = await supabase.from('restaurant_likes').delete().match({ user_id: user.id, restaurant_id: restaurantId });
-    if (error) return c.json({ error: error.message }, 500);
-    return c.json({ success: true, removed: true });
-  }
-
-  const { data, error } = await supabase
-    .from('restaurant_likes')
-    .upsert(
-      { user_id: user.id, restaurant_id: restaurantId, is_like: isLike },
-      { onConflict: 'user_id, restaurant_id' }
-    )
-    .select()
-    .single();
-
-  if (error) return c.json({ error: error.message }, 500);
-  return c.json(data);
-});
 
 app.post('/api/dishes/:id/like', async (c) => {
   const supabase = getSupabase(c);
@@ -1093,23 +1077,7 @@ app.post('/api/dishes/:id/like', async (c) => {
   return c.json(data);
 });
 
-app.get('/api/restaurants/:id/likes', async (c) => {
-  const supabase = getSupabase(c);
-  const restaurantId = c.req.param('id');
-  const { data, error } = await supabase
-    .from('restaurant_likes')
-    .select('users(first_name, last_name)')
-    .eq('restaurant_id', restaurantId)
-    .eq('is_like', true);
 
-  if (error) return c.json({ error: error.message }, 500);
-
-  const names = (data || []).map((row: any) =>
-    `${row.users?.first_name || ''} ${row.users?.last_name || ''}`.trim()
-  ).filter(Boolean);
-
-  return c.json({ names });
-});
 
 app.get('/api/dishes/:id/likes', async (c) => {
   const supabase = getSupabase(c);
@@ -1485,6 +1453,74 @@ app.post('/api/top-picks/publish-instagram', async (c) => {
     console.error('Zernio publish error details:', err.message);
     return c.json({ error: err.message }, 500);
   }
+});
+
+app.post('/api/restaurants/:id/poll', async (c) => {
+  const supabase = getSupabase(c);
+  const restaurantId = c.req.param('id');
+  const { deviceId, optionId } = await c.req.json();
+
+  if (!deviceId || (typeof optionId !== 'number' && optionId !== null)) return c.json({ error: 'Missing fields' }, 400);
+
+  const { data: user, error: userError } = await supabase
+    .from('users')
+    .select('id')
+    .eq('device_id', deviceId)
+    .maybeSingle();
+
+  if (userError || !user) return c.json({ error: 'User not found' }, 404);
+
+  if (optionId === null) {
+    const { error } = await supabase.from('restaurant_polls').delete().match({ user_id: user.id, restaurant_id: restaurantId });
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ success: true, removed: true });
+  }
+
+  const { data, error } = await supabase
+    .from('restaurant_polls')
+    .upsert(
+      { user_id: user.id, restaurant_id: restaurantId, option_id: optionId, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id, restaurant_id' }
+    )
+    .select()
+    .single();
+
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
+});
+
+app.post('/api/restaurants/:id/wishlist', async (c) => {
+  const supabase = getSupabase(c);
+  const restaurantId = c.req.param('id');
+  const { deviceId, isInWishlist } = await c.req.json();
+
+  if (!deviceId || typeof isInWishlist !== 'boolean') return c.json({ error: 'Missing fields' }, 400);
+
+  const { data: user, error: userError } = await supabase
+    .from('users')
+    .select('id')
+    .eq('device_id', deviceId)
+    .maybeSingle();
+
+  if (userError || !user) return c.json({ error: 'User not found' }, 404);
+
+  if (!isInWishlist) {
+    const { error } = await supabase.from('wishlists').delete().match({ user_id: user.id, restaurant_id: restaurantId });
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ success: true, removed: true });
+  }
+
+  const { data, error } = await supabase
+    .from('wishlists')
+    .upsert(
+      { user_id: user.id, restaurant_id: restaurantId },
+      { onConflict: 'user_id, restaurant_id' }
+    )
+    .select()
+    .single();
+
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
 });
 
 export default app;

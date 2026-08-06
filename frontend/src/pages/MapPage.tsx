@@ -210,7 +210,7 @@ const truncateName = (name: string) => {
   return `${name.slice(0, 18)}...`;
 };
 
-const buildRestaurantIcon = (restaurant: Restaurant, rating?: number, isDim?: boolean, isSelected?: boolean, isLiked?: boolean) => {
+const buildRestaurantIcon = (restaurant: Restaurant, rating?: number, isDim?: boolean, isSelected?: boolean, isBookmarked?: boolean, editMode?: boolean) => {
   const ratingText = rating === undefined ? '--' : rating.toFixed(1);
   const color = getRatingColor(rating);
   const label = truncateName(restaurant.name);
@@ -220,8 +220,8 @@ const buildRestaurantIcon = (restaurant: Restaurant, rating?: number, isDim?: bo
     isSelected ? 'restaurant-marker--selected' : ''
   ].filter(Boolean).join(' ');
 
-  const heartHtml = isLiked ? `<div class="restaurant-marker__heart" style="position: absolute; top: -6px; right: -6px; background: white; border-radius: 50%; padding: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); z-index: 10;"><svg width="12" height="12" viewBox="0 0 24 24" fill="#ef4444" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg></div>` : '';
-  const instaTickHtml = restaurant.instaPublished ? `<div class="restaurant-marker__insta-tick" title="Published to Instagram" style="position: absolute; top: -6px; left: -6px; background: #9333ea; border-radius: 50%; padding: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); z-index: 10;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>` : '';
+  const heartHtml = isBookmarked ? `<div class="restaurant-marker__heart" style="position: absolute; top: -6px; right: -6px; background: white; border-radius: 50%; padding: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); z-index: 10;"><svg width="12" height="12" viewBox="0 0 24 24" fill="#f59e0b" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"></path></svg></div>` : '';
+  const instaTickHtml = (restaurant.instaPublished && editMode) ? `<div class="restaurant-marker__insta-tick" title="Published to Instagram" style="position: absolute; top: -6px; left: -6px; background: #9333ea; border-radius: 50%; padding: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); z-index: 10;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>` : '';
 
   return L.divIcon({
     className,
@@ -236,17 +236,19 @@ const RestaurantMarker = React.memo(({
   rating, 
   isDim, 
   isSelected, 
-  isLiked,
+  isBookmarked,
+  editMode,
   onClick 
 }: { 
   restaurant: Restaurant; 
   rating?: number; 
   isDim: boolean; 
   isSelected: boolean; 
-  isLiked?: boolean;
+  isBookmarked?: boolean;
+  editMode?: boolean;
   onClick: (id: string) => void; 
 }) => {
-  const icon = useMemo(() => buildRestaurantIcon(restaurant, rating, isDim, isSelected, isLiked), [restaurant, rating, isDim, isSelected, isLiked]);
+  const icon = useMemo(() => buildRestaurantIcon(restaurant, rating, isDim, isSelected, isBookmarked, editMode), [restaurant, rating, isDim, isSelected, isBookmarked, editMode]);
   
   return (
     <Marker 
@@ -273,7 +275,7 @@ export default function MapPage() {
     ensureCuisine,
     ensureFlavorTag,
     setNetworkBusy,
-    restaurantLikes,
+    wishlist,
     dishLikes
   } = useStore();
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1989,7 +1991,7 @@ export default function MapPage() {
         <SelectedRestaurantFlyTo restaurant={activeRest} />
         <MapClickHandler onClick={handleMapClick} />
         {restaurants.filter(hasValidRestaurantCoordinates).map(rest => {
-          const isLiked = restaurantLikes[rest.id] === true || dishes.some(d => d.restaurantId === rest.id && dishLikes[d.id] === true);
+          const isBookmarked = wishlist.includes(rest.id) || dishes.some(d => d.restaurantId === rest.id && dishLikes[d.id] === true);
           return (
             <RestaurantMarker 
               key={rest.id} 
@@ -1997,7 +1999,8 @@ export default function MapPage() {
               rating={ratingsByRestaurant.get(rest.id)}
               isDim={!matchesFilters(rest)}
               isSelected={rest.id === selectedRest}
-              isLiked={isLiked}
+              isBookmarked={isBookmarked}
+              editMode={editMode}
               onClick={handleMarkerSelect}
             />
           );

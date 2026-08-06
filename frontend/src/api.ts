@@ -110,13 +110,18 @@ export const api = {
   registerUser: (deviceId: string, firstName: string, lastName: string) =>
     sendJSON<any>("POST", "/api/users", { deviceId, firstName, lastName }),
   getUserLikes: (deviceId: string) =>
-    getJSON<{ restaurants: { restaurant_id: string, is_like: boolean }[], dishes: { dish_id: string, is_like: boolean }[] }>(`/api/users/${deviceId}/likes`),
-  setRestaurantLike: (restaurantId: string, deviceId: string, isLike: boolean | null) =>
-    sendJSON<any>("POST", `/api/restaurants/${restaurantId}/like`, { deviceId, isLike }),
+    getJSON<{ 
+      restaurants: { restaurant_id: string, is_like: boolean }[], 
+      dishes: { dish_id: string, is_like: boolean }[],
+      wishlist: { restaurant_id: string }[],
+      polls: { restaurant_id: string, option_id: number }[]
+    }>(`/api/users/${deviceId}/likes`),
+  setRestaurantPoll: (restaurantId: string, deviceId: string, optionId: number | null) =>
+    sendJSON<any>("POST", `/api/restaurants/${restaurantId}/poll`, { deviceId, optionId }),
+  toggleWishlist: (restaurantId: string, deviceId: string, isInWishlist: boolean) =>
+    sendJSON<any>("POST", `/api/restaurants/${restaurantId}/wishlist`, { deviceId, isInWishlist }),
   setDishLike: (dishId: string, deviceId: string, isLike: boolean | null) =>
     sendJSON<any>("POST", `/api/dishes/${dishId}/like`, { deviceId, isLike }),
-  getRestaurantLikes: (restaurantId: string) =>
-    getJSON<{ names: string[] }>(`/api/restaurants/${restaurantId}/likes`),
   getDishLikes: (dishId: string) =>
     getJSON<{ names: string[] }>(`/api/dishes/${dishId}/likes`),
 

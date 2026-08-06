@@ -299,14 +299,16 @@ interface AppState {
   deviceId: string | null;
   userFirstName: string | null;
   userLastName: string | null;
-  restaurantLikes: Record<string, boolean | null>;
   dishLikes: Record<string, boolean | null>;
+  restaurantPolls: Record<string, number | null>;
+  wishlist: string[];
 
   initDeviceUser: () => void;
   registerDeviceUser: (firstName: string, lastName: string) => Promise<void>;
   fetchUserLikes: () => Promise<void>;
-  toggleRestaurantLike: (restaurantId: string, isLike: boolean | null) => Promise<void>;
   toggleDishLike: (dishId: string, isLike: boolean | null) => Promise<void>;
+  setRestaurantPoll: (restaurantId: string, optionId: number | null) => Promise<void>;
+  toggleWishlist: (restaurantId: string) => Promise<void>;
 }
 
 let activeFetchId = 0;
@@ -341,8 +343,9 @@ export const useStore = create<AppState>()(
       deviceId: null,
       userFirstName: null,
       userLastName: null,
-      restaurantLikes: {},
       dishLikes: {},
+      restaurantPolls: {},
+      wishlist: [],
 
       ensureRestaurantType: async (value: string) => {
         const normalized = value.trim();
@@ -1099,40 +1102,21 @@ export const useStore = create<AppState>()(
         if (!state.deviceId) return;
         try {
           const likes = await api.getUserLikes(state.deviceId);
-          const restLikes: Record<string, boolean> = {};
-          likes.restaurants.forEach(l => { restLikes[l.restaurant_id] = l.is_like; });
           const dishLikes: Record<string, boolean> = {};
           likes.dishes.forEach(l => { dishLikes[l.dish_id] = l.is_like; });
-          set({ restaurantLikes: restLikes, dishLikes: dishLikes });
+          
+          const polls: Record<string, number> = {};
+          if (likes.polls) likes.polls.forEach(p => { polls[p.restaurant_id] = p.option_id; });
+          
+          const wishlist = likes.wishlist ? likes.wishlist.map(w => w.restaurant_id) : [];
+
+          set({ dishLikes: dishLikes, restaurantPolls: polls, wishlist });
         } catch (error) {
           console.error("Failed to fetch user likes:", error);
         }
       },
 
-      toggleRestaurantLike: async (restaurantId: string, isLike: boolean | null) => {
-        const state = get();
-        if (!state.deviceId) return;
-        // Optimistic UI update
-        set((s) => {
-          const prevState = s.restaurantLikes[restaurantId];
-          let delta = 0;
-          if (isLike === true && prevState !== true) delta = 1;
-          else if (isLike !== true && prevState === true) delta = -1;
 
-          return {
-            restaurantLikes: { ...s.restaurantLikes, [restaurantId]: isLike },
-            restaurants: delta !== 0
-              ? s.restaurants.map(r => r.id === restaurantId ? { ...r, likeCount: (r.likeCount || 0) + delta } : r)
-              : s.restaurants
-          };
-        });
-        try {
-          await api.setRestaurantLike(restaurantId, state.deviceId, isLike);
-        } catch (error) {
-          console.error("Failed to set restaurant like:", error);
-          // Rollback if failed (optional, simpler to just log for now)
-        }
-      },
 
       toggleDishLike: async (dishId: string, isLike: boolean | null) => {
         const state = get();
@@ -1151,20 +1135,58 @@ export const useStore = create<AppState>()(
               : s.dishes
           };
         });
+
         try {
           await api.setDishLike(dishId, state.deviceId, isLike);
         } catch (error) {
-          console.error("Failed to set dish like:", error);
+          console.error("Failed to toggle dish like:", error);
+        }
+      },
+
+      setRestaurantPoll: async (restaurantId: string, optionId: number | null) => {
+        const state = get();
+        set((s) => ({
+          restaurantPolls: { ...s.restaurantPolls, [restaurantId]: optionId }
+        }));
+        if (state.deviceId) {
+          try {
+            await api.setRestaurantPoll(restaurantId, state.deviceId, optionId);
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      },
+
+      toggleWishlist: async (restaurantId: string) => {
+        const state = get();
+        let isInWishlist = false;
+        set((s) => {
+          isInWishlist = !s.wishlist.includes(restaurantId);
+          return {
+            wishlist: isInWishlist 
+              ? [...s.wishlist, restaurantId]
+              : s.wishlist.filter(id => id !== restaurantId)
+          };
+        });
+        if (state.deviceId) {
+          try {
+            await api.toggleWishlist(restaurantId, state.deviceId, isInWishlist);
+          } catch (e) {
+            console.error(e);
+          }
         }
       },
     }),
     {
-      name: 'soboite-storage-v3',
+      name: 'soboite-storage',
       storage: createJSONStorage(() => indexedDBStorage),
       partialize: (state) => ({
         editMode: state.editMode,
+        isDarkMode: state.isDarkMode,
         restaurants: state.restaurants,
+        deletedRestaurantIds: state.deletedRestaurantIds,
         dishes: state.dishes,
+        deletedDishIds: state.deletedDishIds,
         restaurantTypes: state.restaurantTypes,
         cuisines: state.cuisines,
         flavorTags: state.flavorTags,
@@ -1172,8 +1194,9 @@ export const useStore = create<AppState>()(
         deviceId: state.deviceId,
         userFirstName: state.userFirstName,
         userLastName: state.userLastName,
-        restaurantLikes: state.restaurantLikes,
         dishLikes: state.dishLikes,
+        restaurantPolls: state.restaurantPolls,
+        wishlist: state.wishlist,
       }),
       // Called when IndexedDB async rehydration finishes — signals UI to stop blocking
       onRehydrateStorage: () => (state) => {

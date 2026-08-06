@@ -38,6 +38,10 @@ export interface Restaurant {
   instaPublished?: boolean;
   instaPublishedAt?: string;
   instaEditedPhotoUrl?: string;
+  poll1Count?: number;
+  poll2Count?: number;
+  poll3Count?: number;
+  poll4Count?: number;
 }
 
 export interface DishReview {
