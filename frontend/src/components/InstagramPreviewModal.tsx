@@ -157,12 +157,18 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
       if (addedEditedResto) {
         if (restaurant.photos && restaurant.photos.length > 1) {
           restaurant.photos.slice(1).forEach((media, idx) => {
-            addMedia({ type: 'b-roll', mediaType: getMediaType(media), id: `rest-raw-${idx}`, url: media.url });
+            if (getMediaType(media) === 'video') {
+              addMedia({ type: 'b-roll', mediaType: 'video', id: `rest-raw-${idx}`, url: media.url });
+            }
           });
         }
       } else if (restaurant.photos && restaurant.photos.length > 0) {
         restaurant.photos.forEach((media, idx) => {
-          addMedia({ type: idx === 0 ? 'restaurant' : 'b-roll', mediaType: getMediaType(media), id: `rest-raw-${idx}`, url: media.url });
+          if (idx === 0) {
+            addMedia({ type: 'restaurant', mediaType: getMediaType(media), id: `rest-raw-${idx}`, url: media.url });
+          } else if (getMediaType(media) === 'video') {
+            addMedia({ type: 'b-roll', mediaType: 'video', id: `rest-raw-${idx}`, url: media.url });
+          }
         });
       } else if (restaurant.imageStorageUrl) {
         addMedia({ type: 'restaurant', mediaType: 'image', id: `rest-raw`, url: restaurant.imageStorageUrl });
@@ -189,15 +195,21 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
         if (addedEdited) {
           if (dish.photos && dish.photos.length > 1) {
             dish.photos.slice(1).forEach((media, idx) => {
-               addMedia({ type: 'b-roll', mediaType: getMediaType(media), id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+               if (getMediaType(media) === 'video') {
+                 addMedia({ type: 'b-roll', mediaType: 'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+               }
             });
           }
         } else if (dish.photos && dish.photos.length > 0) {
           dish.photos.forEach((media, idx) => {
-             addMedia({ type: idx === 0 ? 'dish' : 'b-roll', mediaType: getMediaType(media), id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+             if (idx === 0) {
+               addMedia({ type: 'dish', mediaType: getMediaType(media), id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+             } else if (getMediaType(media) === 'video') {
+               addMedia({ type: 'b-roll', mediaType: 'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+             }
           });
         } else if (dish.imageStorageUrl) {
-          addMedia({ type: 'b-roll', mediaType: 'image', id: `dish-${dish.id}-raw`, url: dish.imageStorageUrl });
+          addMedia({ type: 'dish', mediaType: 'image', id: `dish-${dish.id}-raw`, url: dish.imageStorageUrl });
         }
       }
       
@@ -229,12 +241,18 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
     if (addedEditedResto) {
       if (restaurant.photos && restaurant.photos.length > 1) {
         restaurant.photos.slice(1).forEach((media, idx) => {
-          addMedia({ type: 'b-roll', mediaType: getMediaType(media), id: `rest-raw-${idx}`, url: media.url });
+          if (getMediaType(media) === 'video') {
+            addMedia({ type: 'b-roll', mediaType: 'video', id: `rest-raw-${idx}`, url: media.url });
+          }
         });
       }
     } else if (restaurant.photos && restaurant.photos.length > 0) {
       restaurant.photos.forEach((media, idx) => {
-        addMedia({ type: idx === 0 ? 'restaurant' : 'b-roll', mediaType: getMediaType(media), id: `rest-raw-${idx}`, url: media.url });
+        if (idx === 0) {
+          addMedia({ type: 'restaurant', mediaType: getMediaType(media), id: `rest-raw-${idx}`, url: media.url });
+        } else if (getMediaType(media) === 'video') {
+          addMedia({ type: 'b-roll', mediaType: 'video', id: `rest-raw-${idx}`, url: media.url });
+        }
       });
     } else if (restaurant.imageStorageUrl) {
       addMedia({ type: 'restaurant', mediaType: 'image', id: `rest-raw`, url: restaurant.imageStorageUrl });
@@ -256,15 +274,21 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
       if (addedEdited) {
         if (dish.photos && dish.photos.length > 1) {
           dish.photos.slice(1).forEach((media, idx) => {
-            addMedia({ type: 'b-roll', mediaType: getMediaType(media), id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+            if (getMediaType(media) === 'video') {
+              addMedia({ type: 'b-roll', mediaType: 'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+            }
           });
         }
       } else if (dish.photos && dish.photos.length > 0) {
         dish.photos.forEach((media, idx) => {
-          addMedia({ type: idx === 0 ? 'dish' : 'b-roll', mediaType: getMediaType(media), id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+          if (idx === 0) {
+            addMedia({ type: 'dish', mediaType: getMediaType(media), id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+          } else if (getMediaType(media) === 'video') {
+            addMedia({ type: 'b-roll', mediaType: 'video', id: `dish-${dish.id}-raw-${idx}`, url: media.url });
+          }
         });
       } else if (dish.imageStorageUrl) {
-        addMedia({ type: 'b-roll', mediaType: 'image', id: `dish-${dish.id}-raw`, url: dish.imageStorageUrl });
+        addMedia({ type: 'dish', mediaType: 'image', id: `dish-${dish.id}-raw`, url: dish.imageStorageUrl });
       }
     }
     
