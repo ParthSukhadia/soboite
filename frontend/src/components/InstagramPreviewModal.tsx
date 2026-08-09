@@ -80,6 +80,26 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
         });
       }
       
+      const dishesToAnalyze = dishes.filter(d => {
+        const existing = map.get(d.id) || {} as any;
+        const hasPros = (existing.pros && existing.pros.length > 0) || (d.pros && d.pros.length > 0);
+        return forceRegenerate || !hasPros;
+      });
+
+      if (dishesToAnalyze.length > 0) {
+        try {
+          const res = await api.analyzeDishes(dishesToAnalyze);
+          if (res.dishes && Array.isArray(res.dishes)) {
+            res.dishes.forEach((d: any) => {
+              const current = map.get(d.id) || {} as any;
+              map.set(d.id, { ...current, ...d });
+            });
+          }
+        } catch (e) {
+          console.warn("Failed to analyze dishes:", e);
+        }
+      }
+
       // Ensure all dishes have an entry initialized with their existing table values
       dishes.forEach(d => {
         const existing = map.get(d.id) || {} as any;

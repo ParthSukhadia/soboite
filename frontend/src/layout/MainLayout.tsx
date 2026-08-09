@@ -932,7 +932,7 @@ export default function MainLayout() {
               )}
 
               <div className="pt-6 pb-2 text-center text-xs text-gray-400">
-                <p>Version 1.0.1</p>
+                <p>Version 1.0.2</p>
                 <p>Made By Rishabh Masani</p>
               </div>
             </div>
