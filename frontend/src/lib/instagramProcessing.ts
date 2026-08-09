@@ -97,12 +97,22 @@ export const processInstagramImage = async (
   const primaryId = target.primaryPhotoId;
   let imgUrl = target.imageStorageUrl;
   
+  const isVideo = (url?: string, type?: string) => {
+    if (!url) return false;
+    return type === 'video' || url.startsWith('data:video/') || !!url.match(/\.(mp4|webm|mov|ogg)(\?.*)?$/i);
+  };
+
+  if (imgUrl && isVideo(imgUrl)) {
+    imgUrl = undefined;
+  }
+
   if (primaryId && photos.length > 0) {
     const p = photos.find((p: any) => p.id === primaryId);
-    if (p) imgUrl = p.url;
+    if (p && !isVideo(p.url, p.type)) imgUrl = p.url;
   }
   if (!imgUrl && photos.length > 0) {
-    imgUrl = photos[0].url;
+    const firstImg = photos.find((p: any) => !isVideo(p.url, p.type));
+    if (firstImg) imgUrl = firstImg.url;
   }
   if (!imgUrl) throw new Error('No image');
 

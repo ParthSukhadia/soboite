@@ -56,7 +56,7 @@ app.get('/api/events', async (c) => {
 // Example: Get all restaurants (replace with your actual schema)
 app.get('/api/restaurants', async (c) => {
   const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, insta_published, insta_published_at, insta_edited_photo_url, poll_1_count, poll_2_count, poll_3_count, poll_4_count')
+  const { data, error } = await supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, insta_published, insta_published_at, insta_edited_photo_url, instagram_caption, poll_1_count, poll_2_count, poll_3_count, poll_4_count')
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data);
 })
@@ -711,7 +711,13 @@ Return ONLY a JSON object containing 'caption' (the formatted string).
     if (response.text) {
       const result = JSON.parse(response.text);
       if (result.caption) {
-        result.caption = result.caption.replace(/\\n/g, '\n');
+        try {
+          // Sometimes Gemini outputs URL encoded strings, decode it first
+          result.caption = decodeURIComponent(result.caption);
+        } catch (e) {
+          // ignore if not properly encoded
+        }
+        result.caption = result.caption.replace(/\\n/g, '\n').replace(/%0A/gi, '\n');
       }
       return c.json({
         caption: result.caption,
@@ -821,11 +827,22 @@ Return ONLY a JSON object with 'dishes' as an array of objects containing 'id', 
       for (const d of analyzedDishes) {
         if (d.id) {
           const originalDish = dishes.find((od: any) => od.id === d.id);
+          
+          const decodeField = (val: any) => {
+             if (typeof val === 'string') {
+                try { return decodeURIComponent(val).replace(/%0A/gi, '\n'); } catch (e) { return val.replace(/%0A/gi, '\n'); }
+             }
+             if (Array.isArray(val)) {
+                return val.map(v => decodeField(v));
+             }
+             return val;
+          };
+
           const updateData: any = {
-            pros: d.pros || [],
-            cons: d.cons || [],
-            summary: d.summary || null,
-            verdict: d.verdict || null
+            pros: decodeField(d.pros) || [],
+            cons: decodeField(d.cons) || [],
+            summary: decodeField(d.summary) || null,
+            verdict: decodeField(d.verdict) || null
           };
 
           if (originalDish) {
