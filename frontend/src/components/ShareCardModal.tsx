@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Download, Loader2, X } from 'lucide-react';
+import { Download, Loader2, X, Video } from 'lucide-react';
 import { Dish, Restaurant } from '../types';
 import { useStore } from '../store/useStore';
+import { generateStoryVideo } from '../lib/generateStory';
+import { RestaurantStoryProps, RestaurantStory } from '../remotion/RestaurantStory';
+import { Player } from '@remotion/player';
 
 interface ShareCardModalProps {
   isOpen: boolean;
@@ -15,6 +18,8 @@ export default function ShareCardModal({ isOpen, onClose, target, type }: ShareC
   const restaurants = useStore((state) => state.restaurants);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const [previewMode, setPreviewMode] = useState<'image' | 'video'>('image');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -370,6 +375,35 @@ export default function ShareCardModal({ isOpen, onClose, target, type }: ShareC
     document.body.removeChild(link);
   };
 
+  const handleGenerateStory = async () => {
+    setPreviewMode('video');
+  };
+
+  // Helper to extract props based on the selected item
+  const getRestaurantData = (): RestaurantStoryProps => {
+    if (!target) return { restaurantName: '', area: '', rating: 0, imageUrl: '' };
+    if (type === 'restaurant') {
+      const rest = target as Restaurant;
+      return {
+        restaurantName: rest.name || '',
+        area: rest.locationName || '',
+        cuisine: rest.cuisine,
+        rating: rest.ambienceRating || 0,
+        imageUrl: previewUrl || rest.imageStorageUrl || '',
+      };
+    } else {
+      const dish = target as Dish;
+      const rest = restaurants.find(r => r.id === dish.restaurantId);
+      return {
+        restaurantName: dish.name || '',
+        area: rest?.locationName || '',
+        cuisine: dish.cuisine || rest?.cuisine,
+        rating: dish.rating || 0,
+        imageUrl: previewUrl || rest?.imageStorageUrl || '',
+      };
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -396,7 +430,26 @@ export default function ShareCardModal({ isOpen, onClose, target, type }: ShareC
             </button>
           </div>
           
-          <div className="p-6 bg-slate-50 flex-1 flex flex-col items-center justify-center">
+          <div className="p-6 bg-slate-50 flex-1 flex flex-col items-center justify-center relative">
+            {/* Toggle Button */}
+            <div className="absolute top-4 left-0 right-0 flex justify-center z-10">
+              <div className="bg-white/80 backdrop-blur-md rounded-full p-1 flex shadow-sm border border-gray-100">
+                <button
+                  onClick={() => setPreviewMode('image')}
+                  className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors ${previewMode === 'image' ? 'bg-orange-500 text-white shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                >
+                  Image
+                </button>
+                <button
+                  onClick={() => setPreviewMode('video')}
+                  className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors flex items-center gap-1.5 ${previewMode === 'video' ? 'bg-slate-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                >
+                  <Video size={14} />
+                  Story Video
+                </button>
+              </div>
+            </div>
+
             {/* Hidden canvas used for drawing */}
             <canvas 
               ref={canvasRef} 
@@ -405,33 +458,71 @@ export default function ShareCardModal({ isOpen, onClose, target, type }: ShareC
               className="hidden" 
             />
             
-            {isDrawing ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-4">
-                <Loader2 size={32} className="animate-spin text-orange-500" />
-                <p className="text-sm font-medium text-slate-500 tracking-wide">Generating image...</p>
-              </div>
-            ) : previewUrl ? (
-              <div className="relative group rounded-2xl overflow-hidden shadow-md ring-1 ring-black/5">
-                <img 
-                  src={previewUrl} 
-                  alt="Share Preview" 
-                  className="w-full max-w-[320px] aspect-square object-cover" 
-                />
-              </div>
-            ) : (
-              <p className="text-sm text-red-500">Failed to generate image preview.</p>
-            )}
+            <div className="mt-12 flex flex-col items-center justify-center w-full">
+              {previewMode === 'video' ? (
+                <div className="relative group rounded-2xl overflow-hidden shadow-2xl ring-1 ring-black/10 w-full max-w-[240px] aspect-[9/16] bg-black">
+                  <Player
+                    component={RestaurantStory as any}
+                    inputProps={getRestaurantData()}
+                    durationInFrames={210}
+                    fps={30}
+                    compositionWidth={1080}
+                    compositionHeight={1920}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                    }}
+                    controls
+                    autoPlay
+                    loop
+                  />
+                </div>
+              ) : isDrawing ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-4">
+                  <Loader2 size={32} className="animate-spin text-orange-500" />
+                  <p className="text-sm font-medium text-slate-500 tracking-wide">Generating image...</p>
+                </div>
+              ) : previewUrl ? (
+                <div className="relative group rounded-2xl overflow-hidden shadow-md ring-1 ring-black/5">
+                  <img 
+                    src={previewUrl} 
+                    alt="Share Preview" 
+                    className="w-full max-w-[320px] aspect-square object-cover" 
+                  />
+                </div>
+              ) : (
+                <p className="text-sm text-red-500">Failed to generate image preview.</p>
+              )}
+            </div>
           </div>
           
-          <div className="p-6 bg-white border-t border-gray-100">
-            <button
-              onClick={handleDownload}
-              disabled={isDrawing || !previewUrl}
-              className="w-full py-3.5 bg-orange-500 text-white font-bold rounded-xl hover:bg-orange-600 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm shadow-orange-500/20"
-            >
-              <Download size={20} />
-              Download Image
-            </button>
+          <div className="p-6 bg-white border-t border-gray-100 flex flex-col gap-3">
+            {previewMode === 'image' && (
+              <button
+                onClick={handleDownload}
+                disabled={isDrawing || !previewUrl}
+                className="w-full py-3.5 bg-orange-500 text-white font-bold rounded-xl hover:bg-orange-600 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm shadow-orange-500/20"
+              >
+                <Download size={20} />
+                Download Image
+              </button>
+            )}
+            {previewMode === 'video' && (
+              <button
+                onClick={() => {
+                  alert('Video rendering is simulated. See walkthrough for server-side setup.');
+                }}
+                disabled={isGeneratingVideo}
+                className="w-full py-3.5 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm shadow-slate-900/20"
+              >
+                {isGeneratingVideo ? (
+                  <Loader2 size={20} className="animate-spin" />
+                ) : (
+                  <Download size={20} />
+                )}
+                {isGeneratingVideo ? 'Exporting Video...' : 'Export MP4'}
+              </button>
+            )}
           </div>
         </motion.div>
       </motion.div>

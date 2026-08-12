@@ -20,6 +20,8 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
+    "@remotion/cli": "^4.0.508",
+    "@remotion/player": "^4.0.508",
     "autoprefixer": "^10.4.27",
     "canvas-confetti": "^1.9.4",
     "framer-motion": "^12.38.0",
@@ -32,6 +34,7 @@
     "react-leaflet": "^5.0.0",
     "react-rnd": "^10.5.3",
     "react-router-dom": "^7.13.2",
+    "remotion": "^4.0.508",
     "tailwindcss": "^4.2.2",
     "zod": "^4.3.6",
     "zustand": "^5.0.12"

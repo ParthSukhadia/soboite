@@ -19,7 +19,9 @@ import {
   Camera,
   Merge,
   Copy,
-  Bookmark
+  Bookmark,
+  Video,
+  Film
 } from "lucide-react";
 import { useForm as useRHForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -32,6 +34,8 @@ import CachedImage from "../components/CachedImage";
 import { InstagramPreviewModal } from "../components/InstagramPreviewModal";
 import { useToast } from '../components/Toast';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { StoryGeneratorModal } from '../components/StoryGeneratorModal';
+import { ReelGeneratorModal } from '../components/ReelGeneratorModal';
 import { useStore } from "../store/useStore";
 import { Dish, DishReview, PhotoEntry } from "../types";
 import { optimizeImage } from "../lib/imageOptimization";
@@ -394,6 +398,8 @@ export default function RestaurantDetails() {
   const [isSavingRestaurantPhoto, setIsSavingRestaurantPhoto] = useState(false);
   const [isSavingMetrics, setIsSavingMetrics] = useState(false);
   const [isDeletingRestaurant, setIsDeletingRestaurant] = useState(false);
+  const [isStoryModalOpen, setIsStoryModalOpen] = useState(false);
+  const [isReelModalOpen, setIsReelModalOpen] = useState(false);
   const [deletingDishIds, setDeletingDishIds] = useState<string[]>([]);
   const [isBootstrappingRestaurant, setIsBootstrappingRestaurant] =
     useState(true);
@@ -480,51 +486,6 @@ export default function RestaurantDetails() {
     };
   }, [id, needsPhotoFetch, fetchRestaurantPhotos]);
 
-
-  /*
-  useEffect(() => {
-    // Check if we have dishes and are not already generating
-    if (!id || restaurantDishes.length === 0 || isGeneratingMissingInsights) return;
-
-    // Find dishes that lack both pros and cons, but have some review or rating
-    const missingInsightsDishes = restaurantDishes.filter(
-      (d) => (!d.pros || d.pros.length === 0) && (!d.cons || d.cons.length === 0) && (d.review || (d.reviews && d.reviews.length > 0))
-    );
-
-    if (missingInsightsDishes.length > 0) {
-      let active = true;
-      setIsGeneratingMissingInsights(true);
-      
-      const generateInsights = async () => {
-        try {
-          // Requires api.analyzeDishes to be defined in frontend/src/api.ts
-          const res = await api.analyzeDishes(missingInsightsDishes);
-          if (active && res.dishes && res.dishes.length > 0) {
-            // Update local store with new insights so UI updates immediately
-            res.dishes.forEach((d: any) => {
-              updateDish(d.id, {
-                pros: d.pros,
-                cons: d.cons,
-                summary: d.summary,
-                verdict: d.verdict
-              });
-            });
-          }
-        } catch (err) {
-          console.warn("Failed to generate missing insights:", err);
-        } finally {
-          if (active) setIsGeneratingMissingInsights(false);
-        }
-      };
-
-      generateInsights();
-
-      return () => {
-        active = false;
-      };
-    }
-  }, [id, restaurantDishes, isGeneratingMissingInsights, updateDish]);
-  */
 
   // Keep batch-entry rows in sync with selected photos.
   useEffect(() => {
@@ -1424,6 +1385,20 @@ export default function RestaurantDetails() {
               >
                 <Copy size={16} />
                 Copy Details
+              </button>
+              <button
+                onClick={() => setIsStoryModalOpen(true)}
+                className="inline-flex justify-center items-center gap-2 px-4 py-2 text-sm rounded-xl border border-slate-900 bg-slate-900 text-white hover:bg-slate-800 transition-colors font-semibold"
+              >
+                <Video size={16} />
+                Story Video
+              </button>
+              <button 
+                onClick={() => setIsReelModalOpen(true)}
+                className="inline-flex justify-center items-center gap-2 px-4 py-2 text-sm rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white transition-colors font-semibold"
+              >
+                <Film size={16} />
+                Generate Reel
               </button>
             </div>
           )}
@@ -2418,7 +2393,7 @@ export default function RestaurantDetails() {
                         type="button"
                         key={level}
                         onClick={() => setValue("priceLevel", level)}
-                        className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${level === priceLevel ? "bg-green-100 text-green-700 border border-green-300" : "bg-gray-50 text-gray-500 border border-gray-200"}`}
+                        className={`${level === priceLevel ? "bg-green-100 text-green-700 border border-green-300" : "bg-gray-50 text-gray-500 border border-gray-200"} w-10 h-10 rounded-full flex items-center justify-center transition-colors`}
                       >
                         <PriceLevelIcon level={level} noteSize={10} />
                       </button>
@@ -3106,6 +3081,11 @@ export default function RestaurantDetails() {
         restaurant={restaurant}
         dishes={restaurantDishes}
       />
+      <StoryGeneratorModal
+        isOpen={isStoryModalOpen}
+        onClose={() => setIsStoryModalOpen(false)}
+        restaurant={restaurant}
+      />
       <ConfirmModal
         isOpen={confirmModal.isOpen}
         title={confirmModal.title}
@@ -3115,6 +3095,12 @@ export default function RestaurantDetails() {
           if (confirmModal.action) void confirmModal.action();
         }}
         onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+      />
+      <ReelGeneratorModal 
+        restaurant={restaurant}
+        dishes={restaurantDishes}
+        isOpen={isReelModalOpen}
+        onClose={() => setIsReelModalOpen(false)}
       />
     </div>
   );
