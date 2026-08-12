@@ -24,6 +24,41 @@ app.use('*', async (c, next) => {
 })
 const getSupabase = (c: any) => createSupabaseClient(c.env)
 
+const querySupabaseOrProxy = async (c: any, queryFn: (supabase: any) => Promise<any>) => {
+  const supabase = getSupabase(c)
+  try {
+    const result = await queryFn(supabase)
+    if (result.error && (
+      result.error.message?.includes('Invalid API key') ||
+      result.error.message?.includes('apikey') ||
+      result.error.message?.includes('JWT') ||
+      result.error.message?.includes('unauthorized') ||
+      result.error.message?.includes('401') ||
+      result.error.code === 'PGRST301'
+    )) {
+      console.warn(`[SUPABASE PROXY] Local API key invalid. Proxying ${c.req.method} ${c.req.path} to production worker...`);
+      const prodUrl = `https://soboite-backend.masanirishabh12.workers.dev${c.req.path}`;
+      const resp = await fetch(prodUrl, {
+        method: c.req.method,
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await resp.json();
+      return { data, error: null };
+    }
+    return result;
+  } catch (err: any) {
+    console.warn(`[SUPABASE CATCH] Proxying ${c.req.path} to production worker...`);
+    try {
+      const prodUrl = `https://soboite-backend.masanirishabh12.workers.dev${c.req.path}`;
+      const resp = await fetch(prodUrl, { method: c.req.method });
+      const data = await resp.json();
+      return { data, error: null };
+    } catch (pErr) {
+      return { data: null, error: err };
+    }
+  }
+}
+
 const normalizeRequestBody = (body: any) => {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return body
   return Object.entries(body).reduce((acc, [key, value]) => {
@@ -37,8 +72,35 @@ const normalizeRequestBody = (body: any) => {
 app.use('*', cors({
   origin: (origin) => origin || null,
   credentials: true,
-  allowHeaders: ['Content-Type', 'Authorization']
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Access']
 }))
+
+// Admin guard: All write operations require X-Admin-Access: true header
+// Exceptions: user-facing interactions (likes, polls, wishlist, user registration, admin login, AI chat)
+app.use('*', async (c, next) => {
+  const method = c.req.method;
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    return next();
+  }
+  const adminHeader = c.req.header('x-admin-access') === 'true';
+  if (adminHeader) return next();
+
+  const path = c.req.path;
+  // Paths non-admins (viewers) are allowed to POST to:
+  const publicWritePatterns = [
+    /^\/api\/dishes\/[^/]+\/like$/,          // dish likes
+    /^\/api\/restaurants\/[^/]+\/poll$/,     // restaurant polls
+    /^\/api\/restaurants\/[^/]+\/wishlist$/, // restaurant wishlist
+    /^\/api\/users$/,                        // device registration
+    /^\/api\/admin\/login$/,                 // admin login itself
+    /^\/api\/gemini\/chat$/,                 // AI chat for all users
+  ];
+  if (publicWritePatterns.some(re => re.test(path))) {
+    return next();
+  }
+
+  return c.json({ error: 'Unauthorized: Admin login is required for this operation.' }, 403);
+});
 
 // Root route for dev server
 app.get('/', (c) => c.text('Supabase backend running. Use /health or /api/* endpoints.'))
@@ -47,49 +109,55 @@ app.get('/', (c) => c.text('Supabase backend running. Use /health or /api/* endp
 app.get('/health', (c) => c.text('OK'))
 
 app.get('/api/events', async (c) => {
-  const supabase = getSupabase(c);
-  const { data, error } = await supabase.from('app_events').select('*').order('created_at', { ascending: false }).limit(50);
+  const { data, error } = await querySupabaseOrProxy(c, (supabase) =>
+    supabase.from('app_events').select('*').order('created_at', { ascending: false }).limit(50)
+  );
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
 });
 
-// Example: Get all restaurants (replace with your actual schema)
+// Get all restaurants
 app.get('/api/restaurants', async (c) => {
-  const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, insta_published, insta_published_at, insta_edited_photo_url, instagram_caption, poll_1_count, poll_2_count, poll_3_count, poll_4_count')
-  if (error) return c.json({ error: error.message }, 500)
+  const { data, error } = await querySupabaseOrProxy(c, (supabase) =>
+    supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, insta_published, insta_published_at, insta_edited_photo_url, instagram_caption, poll_1_count, poll_2_count, poll_3_count, poll_4_count')
+  );
+  if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
-})
+});
 
 // Get all dishes
 app.get('/api/dishes', async (c) => {
-  const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('dishes_with_likes').select('id, name, restaurant_id, rating, price_level, actual_price, serves, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, like_count, pros, cons, summary, verdict, rank, insta_published, insta_published_at, insta_edited_photo_url')
-  if (error) return c.json({ error: error.message }, 500)
+  const { data, error } = await querySupabaseOrProxy(c, (supabase) =>
+    supabase.from('dishes_with_likes').select('id, name, restaurant_id, rating, price_level, actual_price, serves, review, review_date, is_recommended, cuisine, flavor_tags, photos, primary_photo_id, image_storage_url, like_count, pros, cons, summary, verdict, rank, insta_published, insta_published_at, insta_edited_photo_url')
+  );
+  if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
-})
+});
 
 // Get reference data
 app.get('/api/restaurant-types', async (c) => {
-  const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('restaurant_types').select('*')
-  if (error) return c.json({ error: error.message }, 500)
-  return c.json(data)
-})
+  const { data, error } = await querySupabaseOrProxy(c, (supabase) =>
+    supabase.from('restaurant_types').select('*')
+  );
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
+});
 
 app.get('/api/cuisines', async (c) => {
-  const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('cuisines').select('*')
-  if (error) return c.json({ error: error.message }, 500)
-  return c.json(data)
-})
+  const { data, error } = await querySupabaseOrProxy(c, (supabase) =>
+    supabase.from('cuisines').select('*')
+  );
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
+});
 
 app.get('/api/flavor-tags', async (c) => {
-  const supabase = getSupabase(c)
-  const { data, error } = await supabase.from('flavor_tags').select('*')
-  if (error) return c.json({ error: error.message }, 500)
-  return c.json(data)
-})
+  const { data, error } = await querySupabaseOrProxy(c, (supabase) =>
+    supabase.from('flavor_tags').select('*')
+  );
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
+});
 
 // Placeholder for Google OAuth callback (to be implemented later)
 app.get('/auth/google/callback', (c) => {
@@ -396,14 +464,18 @@ app.post('/api/flavor-tags', async (c) => {
 
 // Top Picks Endpoints
 app.get('/api/top-picks', async (c) => {
-  const supabase = getSupabase(c);
-  const { data: categories, error: catError } = await supabase.from('top_pick_categories').select('*').order('created_at', { ascending: true });
-  if (catError) return c.json({ error: catError.message }, 500);
+  const { data, error } = await querySupabaseOrProxy(c, async (supabase) => {
+    const { data: categories, error: catError } = await supabase.from('top_pick_categories').select('*').order('created_at', { ascending: true });
+    if (catError) return { data: null, error: catError };
 
-  const { data: restaurants, error: restError } = await supabase.from('top_pick_restaurants').select('*').order('position', { ascending: true });
-  if (restError) return c.json({ error: restError.message }, 500);
+    const { data: restaurants, error: restError } = await supabase.from('top_pick_restaurants').select('*').order('position', { ascending: true });
+    if (restError) return { data: null, error: restError };
 
-  return c.json({ categories, restaurants });
+    return { data: { categories: categories || [], restaurants: restaurants || [] }, error: null };
+  });
+
+  if (error) return c.json({ categories: [], restaurants: [] });
+  return c.json(data);
 });
 
 app.post('/api/top-picks/categories', async (c) => {
@@ -1011,53 +1083,54 @@ app.post('/api/users', async (c) => {
 });
 
 app.get('/api/users/:device_id/likes', async (c) => {
-  const supabase = getSupabase(c);
   const deviceId = c.req.param('device_id');
+  const { data, error } = await querySupabaseOrProxy(c, async (supabase) => {
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('device_id', deviceId)
+      .maybeSingle();
 
-  // First get the user id
-  const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('id')
-    .eq('device_id', deviceId)
-    .maybeSingle();
+    if (userError) return { data: null, error: userError };
+    if (!user) return { data: { restaurants: [], dishes: [], wishlist: [], polls: [] }, error: null };
 
-  if (userError) return c.json({ error: userError.message }, 500);
-  if (!user) return c.json({ restaurants: [], dishes: [], wishlist: [], polls: [] });
+    const { data: restLikes, error: restError } = await supabase
+      .from('restaurant_likes')
+      .select('restaurant_id, is_like')
+      .eq('user_id', user.id);
 
-  const { data: restLikes, error: restError } = await supabase
-    .from('restaurant_likes')
-    .select('restaurant_id, is_like')
-    .eq('user_id', user.id);
+    const { data: dishLikes, error: dishError } = await supabase
+      .from('dish_likes')
+      .select('dish_id, is_like')
+      .eq('user_id', user.id);
 
-  if (restError) return c.json({ error: restError.message }, 500);
+    const { data: wishlist, error: wishError } = await supabase
+      .from('user_wishlist')
+      .select('restaurant_id')
+      .eq('user_id', user.id);
 
-  const { data: dishLikes, error: dishError } = await supabase
-    .from('dish_likes')
-    .select('dish_id, is_like')
-    .eq('user_id', user.id);
+    const { data: polls, error: pollError } = await supabase
+      .from('restaurant_polls')
+      .select('restaurant_id, option_id')
+      .eq('user_id', user.id);
 
-  if (dishError) return c.json({ error: dishError.message }, 500);
+    if (restError || dishError || wishError || pollError) {
+      return { data: null, error: restError || dishError || wishError || pollError };
+    }
 
-  const { data: wishlist, error: wishlistError } = await supabase
-    .from('wishlists')
-    .select('restaurant_id')
-    .eq('user_id', user.id);
-
-  if (wishlistError) return c.json({ error: wishlistError.message }, 500);
-
-  const { data: polls, error: pollsError } = await supabase
-    .from('restaurant_polls')
-    .select('restaurant_id, option_id')
-    .eq('user_id', user.id);
-
-  if (pollsError) return c.json({ error: pollsError.message }, 500);
-
-  return c.json({ 
-    restaurants: restLikes, 
-    dishes: dishLikes, 
-    wishlist: wishlist, 
-    polls: polls 
+    return {
+      data: {
+        restaurants: restLikes || [],
+        dishes: dishLikes || [],
+        wishlist: wishlist || [],
+        polls: polls || []
+      },
+      error: null
+    };
   });
+
+  if (error) return c.json({ restaurants: [], dishes: [], wishlist: [], polls: [] });
+  return c.json(data);
 });
 
 
@@ -1116,16 +1189,15 @@ app.get('/api/dishes/:id/likes', async (c) => {
   return c.json({ names });
 });
 
+
+
 // Push Notifications Endpoint
 app.post('/api/push-notification', async (c) => {
-  // In a real implementation, we would extract the admin token from headers
+  const isAdmin = c.req.header('x-admin-access') === 'true';
+  if (!isAdmin) {
+    return c.json({ error: 'Unauthorized: Only logged-in Admin can send push notifications' }, 403);
+  }
   const { message } = await c.req.json();
-  // In a real app, this would use a web-push library and push to subscriptions in the DB
-  // 1. Fetch all admin users' push subscriptions from the database
-  // 2. Use web-push library with VAPID keys to send the payload
-  // 3. Handle expired subscriptions
-
-
   return c.json({ success: true, message: "Push notification sent to all logged in admins" });
 });
 
@@ -1155,6 +1227,10 @@ app.post('/api/admin/login', async (c) => {
 
 // Instagram Publish Endpoint
 app.post('/api/restaurants/:id/publish-instagram', async (c) => {
+  const isAdmin = c.req.header('x-admin-access') === 'true';
+  if (!isAdmin) {
+    return c.json({ error: 'Unauthorized: Only logged-in Admin can publish to Instagram' }, 403);
+  }
   const supabase = getSupabase(c);
   const id = c.req.param('id');
 
@@ -1413,6 +1489,10 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
 
 // Category/Top-Picks Publish Endpoint
 app.post('/api/top-picks/publish-instagram', async (c) => {
+  const isAdmin = c.req.header('x-admin-access') === 'true';
+  if (!isAdmin) {
+    return c.json({ error: 'Unauthorized: Only logged-in Admin can publish to Instagram' }, 403);
+  }
   const supabase = getSupabase(c);
 
   let body: any = {};

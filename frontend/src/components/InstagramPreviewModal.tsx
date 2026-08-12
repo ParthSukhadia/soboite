@@ -48,6 +48,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
   restaurant,
   dishes
 }) => {
+  const { editMode } = useStore();
   const [step, setStep] = useState<Step>('loading');
   const [previews, setPreviews] = useState<{ type: 'restaurant' | 'dish' | 'b-roll', mediaType: 'image' | 'video', id: string, url: string, selected: boolean }[]>([]);
   const navigate = useNavigate();
@@ -707,75 +708,80 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
               >
                 Download All Photos
               </button>
-              <button
-                onClick={async () => {
-                  setIsPublishing(true);
-                  try {
-                    const dishAnalysesPayload = dishes.map(d => {
-                    const analysis = dishAnalyses.get(d.id);
-                    return {
-                      dishId: d.id,
-                      pros: analysis?.pros || [],
-                      cons: analysis?.cons || [],
-                      originalReviews: d.reviews || []
-                    };
-                  });
-                  const payload = { 
-                    restaurantImage: '', 
-                    dishImages: {} as Record<string, string>, 
-                    caption: captionText,
-                    dishAnalyses: dishAnalysesPayload,
-                    customMediaSequence: previews.filter(p => p.selected).map(p => ({ url: p.url, type: p.mediaType }))
-                  };
-                    previews.forEach(p => {
-                      if (p.type === 'restaurant') payload.restaurantImage = p.url;
-                      else if (p.type === 'dish') payload.dishImages[p.id] = p.url;
-                    });
-                    await onPublish(payload);
-                    onClose();
-                  } catch (e) {
-                    console.error(e);
-                  } finally {
-                    setIsPublishing(false);
-                  }
-                }}
-                disabled={isPublishing || previews.length === 0}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium transition-colors text-sm sm:text-base text-center"
-              >
-                {isPublishing ? 'Publishing...' : 'Approve & Publish'}
-              </button>
-              <button
-                onClick={() => {
-                  const dishAnalysesPayload = dishes.map(d => {
-                    const analysis = dishAnalyses.get(d.id);
-                    return {
-                      dishId: d.id,
-                      pros: analysis?.pros || [],
-                      cons: analysis?.cons || [],
-                      originalReviews: d.reviews || []
-                    };
-                  });
-                  const payload = { 
-                    restaurantImage: '', 
-                    dishImages: {} as Record<string, string>, 
-                    caption: captionText,
-                    dishAnalyses: dishAnalysesPayload,
-                    customMediaSequence: previews.filter(p => p.selected).map(p => ({ url: p.url, type: p.mediaType }))
-                  };
-                  previews.forEach(p => {
-                    if (p.type === 'restaurant') payload.restaurantImage = p.url;
-                    else if (p.type === 'dish') payload.dishImages[p.id] = p.url;
-                  });
-                  // Fire and forget
-                  onPublish(payload).catch(console.error);
-                  onClose();
-                  navigate('/');
-                }}
-                disabled={isPublishing || previews.length === 0}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 font-medium transition-colors text-sm sm:text-base text-center"
-              >
-                Publish & Go to Map
-              </button>
+              {editMode && (
+                <>
+                  <button
+                    onClick={() => {
+                      if (!editMode) {
+                        alert("Admin login required to publish to Instagram.");
+                        return;
+                      }
+                      const dishAnalysesPayload = dishes.map(d => {
+                        const analysis = dishAnalyses.get(d.id);
+                        return {
+                          dishId: d.id,
+                          pros: analysis?.pros || [],
+                          cons: analysis?.cons || [],
+                          originalReviews: d.reviews || []
+                        };
+                      });
+                      const payload = { 
+                        restaurantImage: '', 
+                        dishImages: {} as Record<string, string>, 
+                        caption: captionText,
+                        dishAnalyses: dishAnalysesPayload,
+                        customMediaSequence: previews.filter(p => p.selected).map(p => ({ url: p.url, type: p.mediaType }))
+                      };
+                      previews.forEach(p => {
+                        if (p.type === 'restaurant') payload.restaurantImage = p.url;
+                        else if (p.type === 'dish') payload.dishImages[p.id] = p.url;
+                      });
+                      setIsPublishing(true);
+                      onPublish(payload).finally(() => setIsPublishing(false));
+                    }}
+                    disabled={isPublishing || previews.length === 0}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium transition-colors text-sm sm:text-base text-center"
+                  >
+                    {isPublishing ? 'Publishing...' : 'Approve & Publish'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!editMode) {
+                        alert("Admin login required to publish to Instagram.");
+                        return;
+                      }
+                      const dishAnalysesPayload = dishes.map(d => {
+                        const analysis = dishAnalyses.get(d.id);
+                        return {
+                          dishId: d.id,
+                          pros: analysis?.pros || [],
+                          cons: analysis?.cons || [],
+                          originalReviews: d.reviews || []
+                        };
+                      });
+                      const payload = { 
+                        restaurantImage: '', 
+                        dishImages: {} as Record<string, string>, 
+                        caption: captionText,
+                        dishAnalyses: dishAnalysesPayload,
+                        customMediaSequence: previews.filter(p => p.selected).map(p => ({ url: p.url, type: p.mediaType }))
+                      };
+                      previews.forEach(p => {
+                        if (p.type === 'restaurant') payload.restaurantImage = p.url;
+                        else if (p.type === 'dish') payload.dishImages[p.id] = p.url;
+                      });
+                      // Fire and forget
+                      onPublish(payload).catch(console.error);
+                      onClose();
+                      navigate('/');
+                    }}
+                    disabled={isPublishing || previews.length === 0}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 font-medium transition-colors text-sm sm:text-base text-center"
+                  >
+                    Publish & Go to Map
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

@@ -269,7 +269,7 @@ export default function TopPicksPage() {
 
                   {isExpanded && (
                     <div className="p-6 space-y-4 bg-gray-50/50">
-                      {categoryRests.length > 0 && (
+                      {editMode && categoryRests.length > 0 && (
                         <div className="flex justify-end mb-2">
                           <button
                             onClick={() => handleExportCategory(category, categoryRests)}

@@ -10,6 +10,7 @@ import { RestaurantReelProps, DishData } from '../remotion/types';
 import { musicLibrary, getRecommendedMusic } from '../lib/musicLibrary';
 import { generateStoryVideo } from '../lib/generateStory';
 import { api } from '../api';
+import { useStore } from '../store/useStore';
 
 interface ReelGeneratorModalProps {
   restaurant: any;
@@ -143,7 +144,13 @@ export function ReelGeneratorModal({ restaurant, dishes: rawDishes, isOpen, onCl
     }
   };
 
+  const { editMode } = useStore();
+
   const handlePublishZernio = async () => {
+    if (!editMode) {
+      alert('Admin login required to publish Reel to Instagram.');
+      return;
+    }
     setIsPublishing(true);
     try {
       const url = await generateStoryVideo({ ...formData, compositionId: activeTemplate } as any);
@@ -381,14 +388,16 @@ export function ReelGeneratorModal({ restaurant, dishes: rawDishes, isOpen, onCl
                 {isExporting ? 'Generating Video...' : 'Download MP4'}
               </button>
 
-              <button
-                onClick={handlePublishZernio}
-                disabled={isExporting || isPublishing}
-                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold py-4 px-6 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
-              >
-                {isPublishing ? <Loader2 className="animate-spin" /> : <Send size={20} />}
-                {isPublishing ? 'Publishing...' : 'Publish via Zernio'}
-              </button>
+              {editMode && (
+                <button
+                  onClick={handlePublishZernio}
+                  disabled={isExporting || isPublishing}
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold py-4 px-6 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  {isPublishing ? <Loader2 className="animate-spin" /> : <Send size={20} />}
+                  {isPublishing ? 'Publishing...' : 'Publish via Zernio'}
+                </button>
+              )}
             </div>
           </div>
         </div>

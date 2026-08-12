@@ -231,6 +231,10 @@ export default function MainLayout() {
   };
 
   const executePublishAll = async () => {
+    if (!editMode) {
+      addToast('Admin login required to publish to Instagram.', 'error');
+      return;
+    }
     setIsProcessing(true);
     setStatusMessage('Publishing to Instagram...');
     try {

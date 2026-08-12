@@ -767,11 +767,19 @@ export default function RestaurantDetails() {
   };
 
   const handlePublishInstagram = async () => {
+    if (!editMode) {
+      addToast('Admin login required to publish to Instagram.', 'error');
+      return;
+    }
     if (!restaurant || isApiBusy) return;
     setShowInstagramPreview(true);
   };
 
   const handleConfirmPublishInstagram = async (payload: { restaurantImage?: string, dishImages?: Record<string, string>, caption?: string, dishAnalyses?: any[], customMediaSequence?: { url: string, type: string }[] }) => {
+    if (!editMode) {
+      addToast('Admin login required to publish to Instagram.', 'error');
+      return;
+    }
     if (!restaurant) return;
     try {
       addToast('Uploading custom images and publishing to Instagram... This may take a few seconds.', 'info');

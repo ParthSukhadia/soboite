@@ -3,6 +3,7 @@ import { X, Download, Share2, Camera, Loader2, Moon, Sun, LayoutGrid, Upload, Se
 import { api } from '../api';
 import { TopPickCategory, Restaurant } from '../types';
 import { processInstagramCategory } from '../lib/instagramProcessing';
+import { useStore } from '../store/useStore';
 
 interface Props {
   isOpen: boolean;
@@ -14,6 +15,7 @@ interface Props {
 export type InstagramTheme = 'light' | 'dark' | 'gold';
 
 export default function CategoryInstagramPreviewModal({ isOpen, onClose, category, restaurants }: Props) {
+  const { editMode } = useStore();
   const [captionText, setCaptionText] = useState(`Top Picks: ${category?.name} 🏆\n\nCurated by Sobo.ite\n\n#Soboite #TopPicks #FoodRecommendations`);
   const [isPublishing, setIsPublishing] = useState(false);
   const [theme, setTheme] = useState<InstagramTheme>('light');
@@ -69,6 +71,10 @@ export default function CategoryInstagramPreviewModal({ isOpen, onClose, categor
   };
 
   const handlePublish = async () => {
+    if (!editMode) {
+      alert('Admin login required to publish to Instagram.');
+      return;
+    }
     let finalUrl = dataUrl;
 
     if (!finalUrl) return;
@@ -79,9 +85,9 @@ export default function CategoryInstagramPreviewModal({ isOpen, onClose, categor
         caption: captionText
       });
       onClose();
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert('Failed to publish. Check console.');
+      alert(e.message || 'Failed to publish.');
     } finally {
       setIsPublishing(false);
     }
@@ -206,13 +212,15 @@ export default function CategoryInstagramPreviewModal({ isOpen, onClose, categor
           >
             {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Download
           </button>
-          <button
-            onClick={handlePublish}
-            disabled={isPublishing || !dataUrl || isGenerating}
-            className="px-6 py-2.5 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-md hover:shadow-lg"
-          >
-            {isPublishing ? 'Publishing...' : <><Share2 className="w-4 h-4" /> Approve & Publish</>}
-          </button>
+          {editMode && (
+            <button
+              onClick={handlePublish}
+              disabled={isPublishing || !dataUrl || isGenerating}
+              className="px-6 py-2.5 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-md hover:shadow-lg"
+            >
+              {isPublishing ? 'Publishing...' : <><Share2 className="w-4 h-4" /> Approve & Publish</>}
+            </button>
+          )}
         </div>
 
       </div>
