@@ -712,10 +712,6 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                 <>
                   <button
                     onClick={() => {
-                      if (!editMode) {
-                        alert("Admin login required to publish to Instagram.");
-                        return;
-                      }
                       const dishAnalysesPayload = dishes.map(d => {
                         const analysis = dishAnalyses.get(d.id);
                         return {
@@ -737,7 +733,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                         else if (p.type === 'dish') payload.dishImages[p.id] = p.url;
                       });
                       setIsPublishing(true);
-                      onPublish(payload).finally(() => setIsPublishing(false));
+                      onPublish(payload).then(() => onClose()).finally(() => setIsPublishing(false));
                     }}
                     disabled={isPublishing || previews.length === 0}
                     className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium transition-colors text-sm sm:text-base text-center"
@@ -746,10 +742,6 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                   </button>
                   <button
                     onClick={() => {
-                      if (!editMode) {
-                        alert("Admin login required to publish to Instagram.");
-                        return;
-                      }
                       const dishAnalysesPayload = dishes.map(d => {
                         const analysis = dishAnalyses.get(d.id);
                         return {

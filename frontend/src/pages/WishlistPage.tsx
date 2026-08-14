@@ -1,6 +1,6 @@
 import { useStore } from '../store/useStore';
 import { Link } from 'react-router-dom';
-import { Bookmark, Star, MapPin } from 'lucide-react';
+import { Bookmark, Star, MapPin, ChevronRight } from 'lucide-react';
 import CachedImage from '../components/CachedImage';
 import { getCuisineColor } from '../lib/instagramProcessing';
 
@@ -12,6 +12,9 @@ export default function WishlistPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-8">
+        <Link to="/" className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-black transition">
+          <ChevronRight className="h-4 w-4 rotate-180" /> Back to Map
+        </Link>
         <h1 className="text-3xl font-extrabold text-gray-900 flex items-center gap-2">
           <Bookmark className="text-amber-500" size={32} />
           Your Wishlist

@@ -1683,6 +1683,11 @@ export default function MapPage() {
       label: `₹${costRange.min || '0'} - ₹${costRange.max || 'max'}`,
       onRemove: () => setCostRange({ min: '', max: '' })
     }] : []),
+    ...(filterRating !== null ? [{
+      key: 'rating',
+      label: `${filterRating}+ Stars`,
+      onRemove: () => setFilterRating(null)
+    }] : []),
     ...(filterMood ? [{
       key: `mood:${filterMood}`,
       label: moodOptions.find((item) => item.key === filterMood)?.label ?? filterMood,

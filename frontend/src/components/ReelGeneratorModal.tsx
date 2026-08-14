@@ -147,10 +147,6 @@ export function ReelGeneratorModal({ restaurant, dishes: rawDishes, isOpen, onCl
   const { editMode } = useStore();
 
   const handlePublishZernio = async () => {
-    if (!editMode) {
-      alert('Admin login required to publish Reel to Instagram.');
-      return;
-    }
     setIsPublishing(true);
     try {
       const url = await generateStoryVideo({ ...formData, compositionId: activeTemplate } as any);

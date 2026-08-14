@@ -195,6 +195,9 @@ export default function TopPicksPage() {
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
+            <button onClick={() => navigate('/')} className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-black transition">
+              <ChevronRight className="h-4 w-4 rotate-180" /> Back to Map
+            </button>
             <h1 className="text-3xl font-bold tracking-tight">Top Picks</h1>
             <p className="mt-1 text-sm text-gray-500">Curated top restaurant picks by category.</p>
           </div>

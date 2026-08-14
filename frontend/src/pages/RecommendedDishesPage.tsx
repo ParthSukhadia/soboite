@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ChevronRight } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import CachedImage from '../components/CachedImage';
 import { Dish, Restaurant } from '../types';
@@ -171,6 +172,9 @@ export default function RecommendedDishesPage() {
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
+            <Link to="/" className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-black transition">
+              <ChevronRight className="h-4 w-4 rotate-180" /> Back to Map
+            </Link>
             <h1 className="text-3xl font-bold tracking-tight">Recommended dishes</h1>
             <p className="mt-1 text-sm text-gray-500">
               Browse and sort the dishes you marked as recommended, with filters for restaurants, cuisine, price, rating and tags.
