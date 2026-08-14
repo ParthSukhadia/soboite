@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Player, PlayerRef } from '@remotion/player';
-import { X, ArrowLeft, Download, Loader2, Send } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, Send } from 'lucide-react';
 import { ShouldYouEatHereReel } from '../remotion/ShouldYouEatHereReel';
 import { WhatShouldYouOrderReel } from '../remotion/WhatShouldYouOrderReel';
 import { OneDishReel } from '../remotion/OneDishReel';

@@ -1,4 +1,3 @@
-import { RestaurantStoryProps } from '../remotion/RestaurantStory';
 
 /**
  * Handles the automated generation of an MP4 Story from Restaurant data.

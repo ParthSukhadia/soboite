@@ -37,8 +37,7 @@ export const StoryGeneratorModal: React.FC<StoryGeneratorModalProps> = ({
   // Initialize form when modal opens
   useEffect(() => {
     if (isOpen && restaurant) {
-      const photos = (restaurant?.photos || []).filter((photo: any) => photo.fileType !== 'video');
-      const videoPhoto = restaurant.photos?.find(p => p.url.match(/\.(mp4|mov|webm)$/i) || p.fileType?.startsWith('video/'));
+      const videoPhoto = restaurant.photos?.find(p => p.url.match(/\.(mp4|mov|webm)$/i) || (p as any).fileType?.startsWith('video/'));
       
       setFormData({
         restaurantName: restaurant.name || '',
@@ -78,7 +77,7 @@ export const StoryGeneratorModal: React.FC<StoryGeneratorModalProps> = ({
       audioRef.current.pause();
       setIsPlayingAudio(false);
     } else {
-      if (audioRef.current.src !== window.location.origin + `/${formData.musicFile}` && !audioRef.current.src.endsWith(formData.musicFile)) {
+      if (audioRef.current.src !== window.location.origin + `/${formData.musicFile}` && (!formData.musicFile || !audioRef.current.src.endsWith(formData.musicFile))) {
         audioRef.current.src = `/${formData.musicFile}`;
       }
       audioRef.current.play().then(() => {

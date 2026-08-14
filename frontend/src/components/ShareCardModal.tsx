@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Download, Loader2, X, Video } from 'lucide-react';
 import { Dish, Restaurant } from '../types';
 import { useStore } from '../store/useStore';
-import { generateStoryVideo } from '../lib/generateStory';
+
 import { RestaurantStoryProps, RestaurantStory } from '../remotion/RestaurantStory';
 import { Player } from '@remotion/player';
 
@@ -18,7 +18,7 @@ export default function ShareCardModal({ isOpen, onClose, target, type }: ShareC
   const restaurants = useStore((state) => state.restaurants);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const [isGeneratingVideo] = useState(false);
   const [previewMode, setPreviewMode] = useState<'image' | 'video'>('image');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
@@ -375,9 +375,7 @@ export default function ShareCardModal({ isOpen, onClose, target, type }: ShareC
     document.body.removeChild(link);
   };
 
-  const handleGenerateStory = async () => {
-    setPreviewMode('video');
-  };
+
 
   // Helper to extract props based on the selected item
   const getRestaurantData = (): RestaurantStoryProps => {
