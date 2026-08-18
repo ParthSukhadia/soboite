@@ -118,10 +118,41 @@ app.get('/api/events', async (c) => {
 
 // Get all restaurants
 app.get('/api/restaurants', async (c) => {
+  const isAdmin = c.req.header('x-admin-access') === 'true';
+  console.log(`[/api/restaurants] isAdmin=${isAdmin}, header=${c.req.header('x-admin-access')}`);
+
   const { data, error } = await querySupabaseOrProxy(c, (supabase) =>
     supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, insta_published, insta_published_at, insta_edited_photo_url, instagram_caption, poll_1_count, poll_2_count, poll_3_count, poll_4_count')
   );
   if (error) return c.json({ error: error.message }, 500);
+
+  console.log(`[/api/restaurants] Got ${data?.length || 0} restaurants from DB`);
+
+  // If not admin, filter out restaurants without dishes
+  if (!isAdmin && data) {
+    // Fetch all dishes to know which restaurants have content
+    const { data: allDishes, error: dishesError } = await querySupabaseOrProxy(c, (supabase) =>
+      supabase.from('dishes').select('restaurant_id')
+    );
+
+    if (dishesError) {
+      console.error('Error fetching dishes for filtering:', dishesError);
+      // If we can't fetch dishes, return empty list to be safe
+      return c.json([]);
+    }
+
+    // Create a set of restaurant IDs that have at least one dish
+    const restaurantIdsWithDishes = new Set<string>(
+      (allDishes as any[]).map((d: any) => d.restaurant_id)
+    );
+
+    const filtered = data.filter((r: any) => restaurantIdsWithDishes.has(r.id));
+    console.log(`[/api/restaurants] Filtered ${data.length} → ${filtered.length} restaurants (removed ${data.length - filtered.length} empty ones)`);
+    // Filter restaurants to only show those with dishes
+    return c.json(filtered);
+  }
+
+  console.log(`[/api/restaurants] Admin user or error - returning all ${data?.length || 0} restaurants`);
   return c.json(data);
 });
 
@@ -289,7 +320,7 @@ async function generateDishEmbedding(apiKey: string, dishData: any, restaurantNa
       model: 'gemini-embedding-2',
       contents: ragContext
     });
-    
+
     let values = null;
     if ((response as any).embeddings && (response as any).embeddings.length > 0) {
       values = (response as any).embeddings[0].values;
@@ -298,7 +329,7 @@ async function generateDishEmbedding(apiKey: string, dishData: any, restaurantNa
     } else if (Array.isArray(response) && response[0]?.values) {
       values = response[0].values;
     }
-    
+
     if (values) {
       console.log(`[EMBEDDING GENERATED & SAVED] For dish: "${dishData.name}" | Restaurant: "${restaurantName}" | Dimension: ${values.length}`);
       return { embedding: JSON.stringify(values) };
@@ -586,18 +617,18 @@ app.post('/api/restaurants/:id/generate-embeddings', async (c) => {
     }
   }
 
-  return c.json({ 
-    success: true, 
-    message: `Generated embeddings for ${successCount} dishes. ${failCount} failed.` 
+  return c.json({
+    success: true,
+    message: `Generated embeddings for ${successCount} dishes. ${failCount} failed.`
   });
 });
 
 async function uploadDataUrlToSupabase(supabase: any, dataUrl: string): Promise<string> {
   if (!dataUrl || !dataUrl.startsWith('data:')) return dataUrl;
-  
+
   const [header, base64] = dataUrl.split(',');
   if (!base64) throw new Error("Invalid dataUrl, missing base64 part");
-  
+
   const mimeMatch = header.match(/:(.*?);/);
   const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
   const fileExt = mimeType.split('/')[1] || 'jpg';
@@ -899,15 +930,15 @@ Return ONLY a JSON object with 'dishes' as an array of objects containing 'id', 
       for (const d of analyzedDishes) {
         if (d.id) {
           const originalDish = dishes.find((od: any) => od.id === d.id);
-          
+
           const decodeField = (val: any) => {
-             if (typeof val === 'string') {
-                try { return decodeURIComponent(val).replace(/%0A/gi, '\n'); } catch (e) { return val.replace(/%0A/gi, '\n'); }
-             }
-             if (Array.isArray(val)) {
-                return val.map(v => decodeField(v));
-             }
-             return val;
+            if (typeof val === 'string') {
+              try { return decodeURIComponent(val).replace(/%0A/gi, '\n'); } catch (e) { return val.replace(/%0A/gi, '\n'); }
+            }
+            if (Array.isArray(val)) {
+              return val.map(v => decodeField(v));
+            }
+            return val;
           };
 
           const updateData: any = {
@@ -960,7 +991,7 @@ app.post('/api/gemini/chat', async (c) => {
       model: 'gemini-embedding-2',
       contents: message
     });
-    
+
     let queryEmbedding = null;
     if ((embedResponse as any).embeddings && (embedResponse as any).embeddings.length > 0) {
       queryEmbedding = (embedResponse as any).embeddings[0].values;
@@ -1367,39 +1398,39 @@ app.post('/api/restaurants/:id/publish-instagram', async (c) => {
   } else {
     // 1. Add Restaurant Cover Photo
     if (restaurantImageUrl) {
-    mediaToPublish.push({ url: restaurantImageUrl, type: 'image' });
-  } else if (restaurant.image_storage_url) {
-    mediaToPublish.push({ url: restaurant.image_storage_url, type: 'image' });
-  } else if (restaurant.photos && restaurant.photos.length > 0) {
-    mediaToPublish.push({ url: restaurant.photos[0].url, type: (restaurant.photos[0].type || 'image').toLowerCase() });
-  }
+      mediaToPublish.push({ url: restaurantImageUrl, type: 'image' });
+    } else if (restaurant.image_storage_url) {
+      mediaToPublish.push({ url: restaurant.image_storage_url, type: 'image' });
+    } else if (restaurant.photos && restaurant.photos.length > 0) {
+      mediaToPublish.push({ url: restaurant.photos[0].url, type: (restaurant.photos[0].type || 'image').toLowerCase() });
+    }
 
-  // 2. Add Dish Photos and Videos
-  if (dishes && dishes.length > 0) {
-    dishes.forEach(dish => {
-      // If there's an edited Info Card for this dish, add it first
-      if (dishImageUrls && dishImageUrls[dish.id]) {
-        mediaToPublish.push({ url: dishImageUrls[dish.id], type: 'image' });
+    // 2. Add Dish Photos and Videos
+    if (dishes && dishes.length > 0) {
+      dishes.forEach(dish => {
+        // If there's an edited Info Card for this dish, add it first
+        if (dishImageUrls && dishImageUrls[dish.id]) {
+          mediaToPublish.push({ url: dishImageUrls[dish.id], type: 'image' });
 
-        // Then add the remaining raw media for this dish as B-Roll (skip index 0 as it was the base for Info Card)
-        if (dish.photos && dish.photos.length > 1) {
-          const rawMedia = dish.photos.slice(1);
-          rawMedia.forEach((media: any) => {
+          // Then add the remaining raw media for this dish as B-Roll (skip index 0 as it was the base for Info Card)
+          if (dish.photos && dish.photos.length > 1) {
+            const rawMedia = dish.photos.slice(1);
+            rawMedia.forEach((media: any) => {
+              mediaToPublish.push({ url: media.url, type: (media.type || 'image').toLowerCase() });
+            });
+          }
+        } else if (dish.image_storage_url) {
+          // Fallback: No edited image, just use storage URL
+          mediaToPublish.push({ url: dish.image_storage_url, type: 'image' });
+        } else if (dish.photos && dish.photos.length > 0) {
+          // Fallback: No edited image, use all raw photos/videos for this dish
+          dish.photos.forEach((media: any) => {
             mediaToPublish.push({ url: media.url, type: (media.type || 'image').toLowerCase() });
           });
         }
-      } else if (dish.image_storage_url) {
-        // Fallback: No edited image, just use storage URL
-        mediaToPublish.push({ url: dish.image_storage_url, type: 'image' });
-      } else if (dish.photos && dish.photos.length > 0) {
-        // Fallback: No edited image, use all raw photos/videos for this dish
-        dish.photos.forEach((media: any) => {
-          mediaToPublish.push({ url: media.url, type: (media.type || 'image').toLowerCase() });
-        });
-      }
-    });
+      });
+    }
   }
-}
 
   // 3. Catch any data URLs that might have come from the database (e.g. dish.photos)
   try {

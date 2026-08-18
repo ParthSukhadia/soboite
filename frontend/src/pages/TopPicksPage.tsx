@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
-import { Restaurant, TopPickCategory } from '../types';
+import { Restaurant, TopPickCategory, isRestaurantVisibleToUser } from '../types';
 import { ChevronDown, ChevronRight, Plus, Edit2, Trash2, Loader2, Award, X, Camera } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -231,7 +231,8 @@ export default function TopPicksPage() {
                 .filter(tr => tr.category_id === category.id)
                 .sort((a, b) => a.position - b.position)
                 .map(tr => restaurants.find(r => r.id === tr.restaurant_id))
-                .filter((r): r is Restaurant => Boolean(r));
+                .filter((r): r is Restaurant => Boolean(r))
+                .filter((r) => isRestaurantVisibleToUser(r, dishes, editMode));
 
               return (
                 <div key={category.id} className={`rounded-3xl border border-gray-100 bg-white shadow-xl shadow-gray-200/50 overflow-hidden transition-all duration-300 transform ${isExpanded ? 'scale-[1.01]' : 'hover:scale-[1.01]'}`}>

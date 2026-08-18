@@ -37,7 +37,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { StoryGeneratorModal } from '../components/StoryGeneratorModal';
 import { ReelGeneratorModal } from '../components/ReelGeneratorModal';
 import { useStore } from "../store/useStore";
-import { Dish, DishReview, PhotoEntry } from "../types";
+import { Dish, DishReview, PhotoEntry, restaurantHasDishes } from "../types";
 import { optimizeImage } from "../lib/imageOptimization";
 import { api } from "../api";
 
@@ -243,6 +243,15 @@ export default function RestaurantDetails() {
   };
 
   const restaurant = restaurants.find((entry) => entry.id === id);
+
+  // Non-admin viewers should never land on a restaurant page for a restaurant
+  // that has no dishes yet. If they navigate directly to such a URL, send them
+  // back to the map. Logged-in admins always keep full access to manage these.
+  useEffect(() => {
+    if (restaurant && !editMode && !restaurantHasDishes(restaurant, dishes)) {
+      void navigate('/', { replace: true });
+    }
+  }, [restaurant, editMode, dishes, navigate]);
 
   const getDishReviews = (dish: Dish): DishReview[] => {
     const entries =
