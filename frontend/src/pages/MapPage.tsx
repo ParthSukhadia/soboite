@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMapEvents, useMap } from 'react-leaflet';
 import { useStore } from '../store/useStore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, X, Star, Utensils, SlidersHorizontal, RotateCcw, ImagePlus, Loader2, Smile, FileText, PartyPopper, Crown, Sparkles, Trophy } from 'lucide-react';
 import L from 'leaflet';
-import { Restaurant } from '../types';
+import { Restaurant, isRestaurantVisibleToUser } from '../types';
 import { optimizeImage } from '../lib/imageOptimization';
 import TagSelector from '../components/TagSelector';
 import PriceLevelIcon from '../components/PriceLevelIcon';
@@ -137,7 +137,7 @@ function MapViewportUpdater({ center }: { center: L.LatLng | null }) {
 
   useEffect(() => {
     if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    
+
     const fly = () => {
       // Check if the map is visible before flying to avoid NaN errors when container is display:none
       const size = map.getSize();
@@ -155,7 +155,7 @@ function MapViewportUpdater({ center }: { center: L.LatLng | null }) {
     if (!fly()) {
       map.once('resize', fly);
     }
-    
+
     return () => {
       map.off('resize', fly);
     };
@@ -231,27 +231,27 @@ const buildRestaurantIcon = (restaurant: Restaurant, rating?: number, isDim?: bo
   });
 };
 
-const RestaurantMarker = React.memo(({ 
-  restaurant, 
-  rating, 
-  isDim, 
-  isSelected, 
+const RestaurantMarker = React.memo(({
+  restaurant,
+  rating,
+  isDim,
+  isSelected,
   isBookmarked,
   editMode,
-  onClick 
-}: { 
-  restaurant: Restaurant; 
-  rating?: number; 
-  isDim: boolean; 
-  isSelected: boolean; 
+  onClick
+}: {
+  restaurant: Restaurant;
+  rating?: number;
+  isDim: boolean;
+  isSelected: boolean;
   isBookmarked?: boolean;
   editMode?: boolean;
-  onClick: (id: string) => void; 
+  onClick: (id: string) => void;
 }) => {
   const icon = useMemo(() => buildRestaurantIcon(restaurant, rating, isDim, isSelected, isBookmarked, editMode), [restaurant, rating, isDim, isSelected, isBookmarked, editMode]);
-  
+
   return (
-    <Marker 
+    <Marker
       position={[restaurant.lat, restaurant.lng]}
       icon={icon}
       eventHandlers={{ click: () => onClick(restaurant.id) }}
@@ -282,7 +282,7 @@ export default function MapPage() {
   const [showStatsPopup, setShowStatsPopup] = useState(false);
   const [showTextImport, setShowTextImport] = useState(false);
   const [textImportContent, setTextImportContent] = useState('');
-        const [latLng, setLatLng] = useState<PinLatLng | null>(null);
+  const [latLng, setLatLng] = useState<PinLatLng | null>(null);
   const [currentPosition, setCurrentPosition] = useState<L.LatLng | null>(null);
   const [addStep, setAddStep] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
@@ -507,33 +507,41 @@ export default function MapPage() {
     return result;
   }, [dishes, restaurants]);
 
+  // A restaurant is only publicly visible to non-admin viewers once it has at
+  // least one dish. Admins (edit mode) always see every restaurant so they can
+  // manage incomplete entries.
+  const visibleRestaurants = useMemo(
+    () => restaurants.filter((rest) => isRestaurantVisibleToUser(rest, dishes, editMode)),
+    [restaurants, dishes, editMode]
+  );
+
   const typeOptions = useMemo(() => {
-    const values = [...restaurantTypes, ...restaurants.map((r) => r.type).filter((v): v is string => Boolean(v))];
+    const values = [...restaurantTypes, ...visibleRestaurants.map((r) => r.type).filter((v): v is string => Boolean(v))];
     return Array.from(new Set(values)).sort();
-  }, [restaurants, restaurantTypes]);
+  }, [visibleRestaurants, restaurantTypes]);
 
   const cuisineOptions = useMemo(() => {
     const values = [
       ...cuisines,
-      ...restaurants.map((r) => r.cuisine).filter((v): v is string => Boolean(v)),
+      ...visibleRestaurants.map((r) => r.cuisine).filter((v): v is string => Boolean(v)),
       ...dishes.map((d) => d.cuisine).filter((v): v is string => Boolean(v))
     ];
     return Array.from(new Set(values)).sort();
-  }, [restaurants, dishes, cuisines]);
+  }, [visibleRestaurants, dishes, cuisines]);
 
   const costOptions = useMemo(() => {
-    const values = restaurants
+    const values = visibleRestaurants
       .map((r) => r.costForTwo)
       .filter((v): v is number => typeof v === 'number' && !Number.isNaN(v));
     return Array.from(new Set(values)).sort((a, b) => a - b);
-  }, [restaurants]);
+  }, [visibleRestaurants]);
 
   const locationOptions = useMemo(() => {
-    const values = restaurants
+    const values = visibleRestaurants
       .map((r) => r.locationName)
       .filter((v): v is string => Boolean(v));
     return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
-  }, [restaurants]);
+  }, [visibleRestaurants]);
 
   const matchesFilters = (restaurant: Restaurant) => {
     const matchesType = filterTypes.length === 0 || (restaurant.type ? filterTypes.includes(restaurant.type) : false);
@@ -626,15 +634,15 @@ export default function MapPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: textImportContent }),
         });
-        
+
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
           throw new Error(errData.error || 'Text processing failed');
         }
-        
+
         dataToMap = await response.json();
       }
-      
+
       const resto = dataToMap.restaurant || dataToMap;
       const parsedDishes = dataToMap.dishes || [];
 
@@ -649,7 +657,7 @@ export default function MapPage() {
       if (resto.lat || resto.latitude) {
         setLatLng({ lat: resto.lat || resto.latitude, lng: resto.lng || resto.longitude });
       }
-      
+
       if (resto.area || resto.locationName) {
         setNewRestLocationName(resto.area || resto.locationName);
       }
@@ -665,7 +673,7 @@ export default function MapPage() {
       if (combinedNotes) {
         setNewRestNotes(combinedNotes.trim());
       }
-      
+
       if (parsedDishes && parsedDishes.length > 0) {
         setDishPhotos(parsedDishes.map((d: any) => {
           let dishReview = d.review || d.description || '';
@@ -694,7 +702,7 @@ export default function MapPage() {
         }));
         setShowDishBuilder(true);
       }
-      
+
       setShowTextImport(false);
       setTextImportContent('');
       setAddStep(2);
@@ -1144,7 +1152,7 @@ export default function MapPage() {
             }
           ];
         }
-        return prev.map(d => 
+        return prev.map(d =>
           d.id === targetId ? { ...d, imageStorageUrl: url, photoPosition: { x: 50, y: 50 }, photoZoom: 1 } : d
         );
       });
@@ -1362,37 +1370,37 @@ export default function MapPage() {
     {
       key: 'pizza',
       label: 'Pizza',
-      emoji: '🍕',
+      emoji: 'ðŸ•',
       keywords: ['pizza', 'slice', 'margherita', 'cheese', 'pizza']
     },
     {
       key: 'burger',
       label: 'Burger',
-      emoji: '🍔',
+      emoji: 'ðŸ”',
       keywords: ['burger', 'bun', 'patty', 'cheese', 'fries']
     },
     {
       key: 'south-indian',
       label: 'South Indian',
-      emoji: '🥘',
+      emoji: 'ðŸ¥˜',
       keywords: ['south indian', 'dosa', 'idli', 'uttapam', 'sambar', 'vada', 'filter coffee']
     },
     {
       key: 'chinese',
       label: 'Chinese',
-      emoji: '🥟',
+      emoji: 'ðŸ¥Ÿ',
       keywords: ['chinese', 'noodle', 'manchurian', 'dimsum', 'spring roll', 'hakka']
     },
     {
       key: 'street-food',
       label: 'Street food',
-      emoji: '🌯',
+      emoji: 'ðŸŒ¯',
       keywords: ['street', 'chaat', 'pav bhaji', 'bhel', 'samosa', 'kebab', 'vada pav', 'kulfi']
     },
     {
       key: 'dessert',
       label: 'Dessert',
-      emoji: '🍨',
+      emoji: 'ðŸ¨',
       keywords: ['dessert', 'sweet', 'ice cream', 'kulfi', 'rasmalai', 'gajar halwa']
     }
   ];
@@ -1443,7 +1451,7 @@ export default function MapPage() {
 
   const displayRestaurants = useMemo(() => {
     if (!selectedRest) return [];
-    const selected = restaurants.find((rest) => rest.id === selectedRest);
+    const selected = visibleRestaurants.find((rest) => rest.id === selectedRest);
     if (!selected) return [];
 
     const pool = filteredRestaurants.some((rest) => rest.id === selected.id)
@@ -1468,7 +1476,7 @@ export default function MapPage() {
     const rightCards = others.slice(mid);
 
     return [...leftCards, selectedCard, ...rightCards];
-  }, [filteredRestaurants, restaurants, selectedRest]);
+  }, [filteredRestaurants, visibleRestaurants, selectedRest]);
 
   useEffect(() => {
     if (!showAddForm && displayRestaurants.length === 0 && restaurants.length > 0 && !showInitialLoader && filterMood) {
@@ -1605,10 +1613,14 @@ export default function MapPage() {
   };
 
   useEffect(() => {
-    if (selectedRest && !restaurants.find((rest) => rest.id === selectedRest)) {
+    if (!selectedRest) return;
+    const selected = restaurants.find((rest) => rest.id === selectedRest);
+    // Clear the selection when the restaurant is no longer visible to the
+    // current viewer (e.g. a non-admin viewing a restaurant that has no dishes yet).
+    if (!selected || !isRestaurantVisibleToUser(selected, dishes, editMode)) {
       setSelectedRest(null);
     }
-  }, [selectedRest, restaurants]);
+  }, [selectedRest, restaurants, dishes, editMode]);
 
   useEffect(() => {
     if (!selectedRest) return;
@@ -1694,7 +1706,7 @@ export default function MapPage() {
     }] : []),
     ...(costRange.min || costRange.max ? [{
       key: 'cost',
-      label: `₹${costRange.min || '0'} - ₹${costRange.max || 'max'}`,
+      label: `â‚¹${costRange.min || '0'} - â‚¹${costRange.max || 'max'}`,
       onRemove: () => setCostRange({ min: '', max: '' })
     }] : []),
     ...(filterRating !== null ? [{
@@ -1877,7 +1889,7 @@ export default function MapPage() {
                           onClick={() => setFilterRating(isActive ? null : stars)}
                           className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed ${isActive ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}
                         >
-                          {stars}+ ⭐
+                          {stars}+ â­
                         </button>
                       );
                     })}
@@ -1903,7 +1915,7 @@ export default function MapPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-gray-500 mb-2">Cost for two (₹)</label>
+                  <label className="block text-[11px] font-semibold text-gray-500 mb-2">Cost for two (â‚¹)</label>
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -1963,40 +1975,40 @@ export default function MapPage() {
         )}
       </AnimatePresence>
 
-        {showInitialLoader && (
-          <div className="absolute inset-0 z-[950] flex items-center justify-center bg-white/80 backdrop-blur-sm px-4 text-center">
-            <div className="rounded-2xl bg-white px-6 py-5 shadow-xl border border-gray-100 flex items-center gap-3 text-gray-800">
-              <Loader2 size={22} className="animate-spin text-red-500" />
-              <span className="font-semibold tracking-wide">Loading restaurants and pins...</span>
-            </div>
+      {showInitialLoader && (
+        <div className="absolute inset-0 z-[950] flex items-center justify-center bg-white/80 backdrop-blur-sm px-4 text-center">
+          <div className="rounded-2xl bg-white px-6 py-5 shadow-xl border border-gray-100 flex items-center gap-3 text-gray-800">
+            <Loader2 size={22} className="animate-spin text-red-500" />
+            <span className="font-semibold tracking-wide">Loading restaurants and pins...</span>
           </div>
-        )}
+        </div>
+      )}
 
-        {!showInitialLoader && restaurants.length === 0 && !loading && (
-          <div className="absolute inset-0 z-[940] flex items-center justify-center bg-white/60 backdrop-blur-sm px-4 text-center">
-            <div className="max-w-sm rounded-2xl bg-white px-6 py-5 shadow-xl border border-gray-100 text-gray-700">
-              <p className="font-semibold text-gray-900">No restaurant data loaded yet.</p>
-              <p className="mt-2 text-sm text-gray-500">If the pins still do not appear, try fetching again.</p>
-              <button
-                type="button"
-                onClick={async () => {
-                  setIsBootstrappingData(true);
-                  try {
-                    await fetchData(true);
-                  } finally {
-                    setIsBootstrappingData(false);
-                  }
-                }}
-                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800"
-              >
-                Retry load
-              </button>
-            </div>
+      {!showInitialLoader && restaurants.length === 0 && !loading && (
+        <div className="absolute inset-0 z-[940] flex items-center justify-center bg-white/60 backdrop-blur-sm px-4 text-center">
+          <div className="max-w-sm rounded-2xl bg-white px-6 py-5 shadow-xl border border-gray-100 text-gray-700">
+            <p className="font-semibold text-gray-900">No restaurant data loaded yet.</p>
+            <p className="mt-2 text-sm text-gray-500">If the pins still do not appear, try fetching again.</p>
+            <button
+              type="button"
+              onClick={async () => {
+                setIsBootstrappingData(true);
+                try {
+                  await fetchData(true);
+                } finally {
+                  setIsBootstrappingData(false);
+                }
+              }}
+              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800"
+            >
+              Retry load
+            </button>
           </div>
-        )}
+        </div>
+      )}
 
       <MapContainer center={[18.9442, 72.8276]} zoom={15} className="h-full w-full" attributionControl={false}>
-        <TileLayer 
+        <TileLayer
           url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
         />
 
@@ -2012,8 +2024,8 @@ export default function MapPage() {
         {restaurants.filter(hasValidRestaurantCoordinates).map(rest => {
           const isBookmarked = wishlist.includes(rest.id) || dishes.some(d => d.restaurantId === rest.id && dishLikes[d.id] === true);
           return (
-            <RestaurantMarker 
-              key={rest.id} 
+            <RestaurantMarker
+              key={rest.id}
               restaurant={rest}
               rating={ratingsByRestaurant.get(rest.id)}
               isDim={!matchesFilters(rest)}
@@ -2110,10 +2122,10 @@ export default function MapPage() {
                                 {rating ? rating.toFixed(1) : '--'}
                               </span>
                               <span>{rest.cuisine ?? rest.type ?? 'Restaurant'}</span>
-                              {rest.locationName && <span>• {rest.locationName}</span>}
+                              {rest.locationName && <span>â€¢ {rest.locationName}</span>}
                             </div>
                             <div className="text-[11px] text-white/80">
-                              {rest.costForTwo ? `₹${rest.costForTwo} for two` : 'Cost unknown'}
+                              {rest.costForTwo ? `â‚¹${rest.costForTwo} for two` : 'Cost unknown'}
                             </div>
                           </div>
                           <button
@@ -2138,11 +2150,11 @@ export default function MapPage() {
         </div>
       )}
 
-      
+
 
       {/* Restaurant Count Layover */}
       {!showAddForm && (
-        <motion.button 
+        <motion.button
           onClick={() => setShowStatsPopup(true)}
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -2174,8 +2186,8 @@ export default function MapPage() {
                     App Milestones
                   </h3>
                 </div>
-                <button 
-                  onClick={() => setShowStatsPopup(false)} 
+                <button
+                  onClick={() => setShowStatsPopup(false)}
                   className="bg-gray-100 hover:bg-gray-200 p-1.5 rounded-full text-gray-500 hover:text-gray-700 transition-colors"
                 >
                   <X size={14} />
@@ -2188,7 +2200,7 @@ export default function MapPage() {
                   { label: "Cuisines", value: cuisines.length, icon: Sparkles, color: "text-emerald-500", bg: "bg-emerald-50" },
                   { label: "Categories", value: restaurantTypes.length, icon: Trophy, color: "text-purple-500", bg: "bg-purple-50" },
                 ].map((stat, i) => (
-                  <motion.div 
+                  <motion.div
                     key={stat.label}
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
@@ -2211,9 +2223,9 @@ export default function MapPage() {
           </motion.div>
         )}
       </AnimatePresence>
-{/* Floating Add Button */}
+      {/* Floating Add Button */}
       {editMode && !showAddForm && (
-        <button 
+        <button
           onClick={openAddForm}
           disabled={isApiBusy}
           className="absolute right-6 z-[1000] bg-red-500 hover:bg-red-600 text-white rounded-full p-4 shadow-xl active:scale-95 transition-transform disabled:opacity-60 disabled:cursor-not-allowed"
@@ -2226,7 +2238,7 @@ export default function MapPage() {
       {/* Add form sheet */}
       <AnimatePresence>
         {showAddForm && editMode && (
-          <motion.div 
+          <motion.div
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
@@ -2248,7 +2260,7 @@ export default function MapPage() {
                     Paste your notes or ChatGPT output with restaurant details and dishes.
                   </p>
                 </div>
-                
+
                 <textarea
                   value={textImportContent}
                   onChange={(e) => setTextImportContent(e.target.value)}
@@ -2259,7 +2271,7 @@ export default function MapPage() {
                 {addFormError && (
                   <p className="text-sm text-red-600 font-medium">{addFormError}</p>
                 )}
-                
+
                 <div className="flex gap-3">
                   <button
                     type="button"
@@ -2279,599 +2291,588 @@ export default function MapPage() {
                 </div>
               </div>
             ) : (
-            <form onSubmit={handleAddSubmit} className="space-y-4 pb-24">
-              <fieldset disabled={isApiBusy} className="space-y-4 disabled:opacity-70">
-              <div className={addStep === 1 ? '' : 'hidden'}>
-                <div className="flex gap-2 mb-6">
-                  <button
-                    type="button"
-                    onClick={() => setShowTextImport(true)}
-                    className="w-full bg-blue-50 text-blue-600 font-bold py-3 rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center justify-center gap-2 shadow-sm text-sm"
-                  >
-                    <FileText size={18} /> Text Import
-                  </button>
-                </div>
-                
-
-
-                <label className="block text-sm font-medium text-gray-700 mb-2">Upload Restaurant Photo</label>
-                <input
-                  ref={restaurantPhotoInputRef}
-                  type="file"
-                  accept="image/*,video/*"
-                  onChange={(e) => handleRestaurantPhotoUpload(e.target.files?.[0] ?? null)}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => restaurantPhotoInputRef.current?.click()}
-                  disabled={isApiBusy}
-                  className="w-full bg-black text-white font-medium py-2.5 rounded-xl hover:bg-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  Upload photo
-                </button>
-                {restaurantPhoto && (
-                  <div
-                    ref={restaurantPhotoPreviewRef}
-                    className={`mt-3 rounded-xl overflow-hidden aspect-square relative [touch-action:none] ${isDraggingRestaurantPhoto ? 'cursor-grabbing' : 'cursor-grab'}`}
-                    onPointerDown={handleRestaurantPhotoPointerDown}
-                    onPointerMove={handleRestaurantPhotoPointerMove}
-                    onPointerUp={handleRestaurantPhotoPointerUp}
-                    onPointerCancel={handleRestaurantPhotoPointerUp}
-                    onTouchStart={handleRestaurantPhotoTouchStart}
-                    onTouchMove={handleRestaurantPhotoTouchMove}
-                    onTouchEnd={handleRestaurantPhotoTouchEnd}
-                  >
-                    <CachedImage
-                      src={restaurantPhoto}
-                      alt="Restaurant preview"
-                      className="w-full h-full object-cover pointer-events-none select-none"
-                      style={{ objectPosition: `${restaurantPhotoPosition.x}% ${restaurantPhotoPosition.y}%`, transform: `scale(${restaurantPhotoZoom})` }}
-                      draggable={false}
-                    />
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setRestaurantPhoto('');
-                        setRestaurantPhotoPosition({ x: 50, y: 50 });
-                        setRestaurantPhotoZoom(1);
-                        restaurantPhotoNextPositionRef.current = { x: 50, y: 50 };
-                        if (restaurantPhotoInputRef.current) {
-                          restaurantPhotoInputRef.current.value = '';
-                        }
-                      }}
-                      className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1"
-                      aria-label="Remove restaurant photo"
-                    >
-                      <X size={14} />
-                    </button>
-                    <div className="absolute left-2 right-2 bottom-2 text-[11px] bg-black/60 text-white px-2 py-1 rounded-md text-center">
-                      Drag to pan, pinch to zoom
-                    </div>
-                  </div>
-                )}
-                {!restaurantPhoto && (
-                  <p className="mt-2 text-xs text-gray-500">You can skip photo and continue.</p>
-                )}
-              </div>
-
-              <div className={addStep === 2 ? '' : 'hidden'}>
-                <div className="mb-6 bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-bold text-indigo-900">Photo Pool</label>
-                  </div>
-                  <input
-                    ref={batchPhotoInputRef}
-                    type="file"
-                    accept="image/*,video/*"
-                    multiple
-                    onChange={(e) => handleBatchPhotoImport(e.target.files)}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => batchPhotoInputRef.current?.click()}
-                    disabled={isApiBusy || isImportingBatch}
-                    className="w-full bg-white text-indigo-600 border border-indigo-200 font-medium py-2.5 rounded-xl hover:bg-indigo-50 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 mb-3 shadow-sm"
-                  >
-                    <ImagePlus size={18} /> Select Multiple Photos
-                  </button>
-                  
-                  {isImportingBatch && (
-                    <div className="flex flex-col items-center justify-center py-6 px-4 bg-gray-50 rounded-xl border border-gray-100 mb-3">
-                      <Loader2 className="animate-spin text-indigo-500 mb-2" size={24} />
-                      <span className="text-sm text-gray-500 font-medium tracking-wide">Loading media...</span>
-                    </div>
-                  )}
-
-                  {pendingGallery.length > 0 && (
-                    <div className="flex gap-3 overflow-x-auto pb-3 snap-x mt-3">
-                      {pendingGallery.map((url, i) => (
-                        <div key={i} className="min-w-[140px] max-w-[140px] snap-center bg-white border border-gray-200 rounded-xl p-2 shrink-0 flex flex-col shadow-sm">
-                          {url.startsWith('data:video/') || url.match(/\.(mp4|webm|mov|ogg)$/i) ? (
-                            <video src={url} className="w-full h-24 object-cover rounded-lg mb-2" autoPlay muted loop playsInline />
-                          ) : (
-                            <img src={url} alt="Pending" className="w-full h-24 object-cover rounded-lg mb-2" />
-                          )}
-                          <select
-                            onChange={(e) => {
-                              if (e.target.value) {
-                                handleAssignPhoto(url, e.target.value);
-                                e.target.value = ''; // Reset for next interaction
-                              }
-                            }}
-                            className="w-full text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                            value=""
-                          >
-                            <option value="" disabled>Assign to...</option>
-                            <option value="restaurant">Restaurant</option>
-                            {dishPhotos.map((d, idx) => (
-                              <option key={d.id} value={d.id}>Dish: {d.name || `Dish ${idx + 1}`}</option>
-                            ))}
-                            <option value="new_dish">+ New Dish</option>
-                          </select>
-                          <button 
-                            type="button" 
-                            onClick={() => handleRemoveFromGallery(url)}
-                            className="mt-2 text-xs text-red-500 font-medium hover:text-red-600"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <label className="block text-sm font-medium text-gray-700 mb-2">Set Location</label>
-                <div className="space-y-2">
-                  {/* Address geocoding */}
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Address (optional)</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={newRestAddress}
-                        onChange={(e) => {
-                          setNewRestAddress(e.target.value);
-                          sessionStorage.setItem('draft_restAddress', e.target.value);
-                        }}
-                        placeholder="Street, landmark, city..."
-                        className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:outline-none"
-                      />
+              <form onSubmit={handleAddSubmit} className="space-y-4 pb-24">
+                <fieldset disabled={isApiBusy} className="space-y-4 disabled:opacity-70">
+                  <div className={addStep === 1 ? '' : 'hidden'}>
+                    <div className="flex gap-2 mb-6">
                       <button
                         type="button"
-                        disabled={isGeocodingAddress || !newRestAddress.trim()}
-                        onClick={() => void handleGeocodeAddressForForm()}
-                        className="px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                        onClick={() => setShowTextImport(true)}
+                        className="w-full bg-blue-50 text-blue-600 font-bold py-3 rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center justify-center gap-2 shadow-sm text-sm"
                       >
-                        {isGeocodingAddress ? 'Finding…' : 'Find on Map'}
+                        <FileText size={18} /> Text Import
                       </button>
                     </div>
-                    <p className="mt-1 text-xs text-gray-400">Enter address then tap "Find on Map" to drop the pin automatically.</p>
-                  </div>
 
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      disabled={isGeocodingAddress}
-                      onClick={() => {
-                        if (validCurrentPosition) {
-                          setLatLngSafely(validCurrentPosition);
-                        } else if (navigator.geolocation) {
-                          setIsGeocodingAddress(true);
-                          setAddFormError(null);
-                          navigator.geolocation.getCurrentPosition(
-                            (position) => {
-                              const pos = L.latLng(position.coords.latitude, position.coords.longitude);
-                              setLatLngSafely(pos);
-                              setCurrentPosition(pos);
-                              setIsGeocodingAddress(false);
-                            },
-                            (err) => {
-                              let msg = err.message || 'Unable to fetch GPS location.';
-                              if (msg.includes('secure origins') || msg.includes('Only secure origins')) {
-                                msg = 'GPS requires HTTPS or localhost. Please type your address manually.';
-                              }
-                              setAddFormError(msg);
-                              setIsGeocodingAddress(false);
-                            },
-                            { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
-                          );
-                        } else {
-                          setAddFormError('Geolocation is not supported by this browser.');
-                        }
-                      }}
-                      className="flex-1 bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isGeocodingAddress ? 'Wait...' : 'Use GPS location'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLatLng(null)}
-                      className="flex-1 bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200 text-sm"
-                    >
-                      Tap map to pin
-                    </button>
-                  </div>
 
-                  <div ref={locationMapRef} className="h-72 overflow-hidden rounded-2xl border border-gray-200 bg-gray-100">
-                    <MapContainer
-                      center={validPinLatLng ? [validPinLatLng.lat, validPinLatLng.lng] : validCurrentPosition ? [validCurrentPosition.lat, validCurrentPosition.lng] : [18.9442, 72.8276]}
-                      zoom={15}
-                      className="h-full w-full"
-                      attributionControl={false}
-                    >
-                      <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
-                      <NearbyPOIs />
-                      <MapClickHandler onClick={(event) => setLatLngSafely(event.latlng, undefined, true)} />
-                      <MapViewportUpdater center={validPinLatLng ? safeLatLng(validPinLatLng) : (validCurrentPosition ? safeLatLng(validCurrentPosition) : null)} />
-                      <MapContainerResizeFixer trigger={`${addStep}-${validPinLatLng ? `${validPinLatLng.lat}-${validPinLatLng.lng}` : validCurrentPosition ? `${validCurrentPosition.lat}-${validCurrentPosition.lng}` : 'default'}`} />
-                      {validPinLatLng && (
-                        <Marker
-                          position={[validPinLatLng.lat, validPinLatLng.lng]}
-                          draggable
-                          eventHandlers={{
-                            dragend: (event) => {
-                              const marker = event.target;
-                              const nextLatLng = marker.getLatLng();
-                              setLatLngSafely({ lat: nextLatLng.lat, lng: nextLatLng.lng }, undefined, true);
-                            }
-                          }}
-                        />
-                      )}
-                    </MapContainer>
 
-                  </div>
-
-                  {!validPinLatLng ? (
-                    <div className="p-3 bg-orange-50 border border-orange-200 text-orange-600 rounded-xl text-center text-sm">
-                      No pin selected. You can skip and we will use your current/default location.
-                    </div>
-                  ) : (
-                    <div className="p-3 bg-green-50 border border-green-200 text-green-700 rounded-xl text-center text-sm">
-                      📍 Pin set at {validPinLatLng.lat.toFixed(5)}, {validPinLatLng.lng.toFixed(5)}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className={addStep === 3 ? '' : 'hidden'}>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Upload Restaurant Photo</label>
                     <input
-                      required
-                      value={newRestName}
-                      onChange={(e) => { setNewRestName(e.target.value); sessionStorage.setItem('draft_restName', e.target.value); }}
-                      className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
-                      placeholder="Restaurant name"
+                      ref={restaurantPhotoInputRef}
+                      type="file"
+                      accept="image/*,video/*"
+                      onChange={(e) => handleRestaurantPhotoUpload(e.target.files?.[0] ?? null)}
+                      className="hidden"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    <textarea
-                      value={newRestNotes}
-                      onChange={(e) => { setNewRestNotes(e.target.value); sessionStorage.setItem('draft_restNotes', e.target.value); }}
-                      className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
-                      placeholder="Atmosphere, cuisine type..."
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Location Name</label>
-                      <input
-                        value={newRestLocationName}
-                        onChange={(e) => { setNewRestLocationName(e.target.value); sessionStorage.setItem('draft_restLocationName', e.target.value); }}
-                        className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
-                        placeholder="Fort"
-                      />
-                      <p className="mt-1 text-xs text-gray-500">One word area name, used in filters.</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
-                      <input
-                        value={newRestAddress}
-                        onChange={(e) => { setNewRestAddress(e.target.value); sessionStorage.setItem('draft_restAddress', e.target.value); }}
-                        className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
-                        placeholder="Street and landmark"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                      <select
-                        value={restaurantTypeSelection}
-                        onChange={(event) => setRestaurantTypeSelection(event.target.value)}
-                        className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
-                      >
-                        <option value="">Select type</option>
-                        {typeOptions.map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                        <option value="__custom__">Add new type...</option>
-                      </select>
-                      {restaurantTypeSelection === '__custom__' && (
-                        <input
-                          value={customRestaurantType}
-                          onChange={(event) => setCustomRestaurantType(event.target.value)}
-                          className="mt-2 w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
-                          placeholder="Enter new type"
-                        />
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Cuisine</label>
-                      <select
-                        value={restaurantCuisineSelection}
-                        onChange={(event) => setRestaurantCuisineSelection(event.target.value)}
-                        className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
-                      >
-                        <option value="">Select cuisine</option>
-                        {cuisineOptions.map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                        <option value="__custom__">Add new cuisine...</option>
-                      </select>
-                      {restaurantCuisineSelection === '__custom__' && (
-                        <input
-                          value={customRestaurantCuisine}
-                          onChange={(event) => setCustomRestaurantCuisine(event.target.value)}
-                          className="mt-2 w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
-                          placeholder="Enter new cuisine"
-                        />
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Cost for two (₹)</label>
-                    <input name="costForTwo" type="number" min="0" value={draftCostForTwo} onChange={(e) => setDraftCostForTwo(e.target.value)} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none" placeholder="600" />
-                  </div>
-
-                  <div className="pt-2 border-t border-gray-200">
                     <button
                       type="button"
-                      onClick={() => setShowDishBuilder((prev) => !prev)}
-                      className="text-sm font-semibold text-gray-700"
+                      onClick={() => restaurantPhotoInputRef.current?.click()}
+                      disabled={isApiBusy}
+                      className="w-full bg-black text-white font-medium py-2.5 rounded-xl hover:bg-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      {showDishBuilder ? 'Hide dish editor' : 'Add dishes now'}
+                      Upload photo
                     </button>
-
-                    {showDishBuilder && (
-                      <div className="space-y-3 mt-3">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-sm font-semibold text-gray-700">Dish cards</h3>
-                          <button
-                            type="button"
-                            onClick={addEmptyDishCard}
-                            className="text-sm font-semibold text-red-500"
-                          >
-                            + Add card
-                          </button>
-                        </div>
-                        <input
-                          ref={dishPhotoInputRef}
-                          type="file"
-                          accept="image/*,video/*"
-                          multiple
-                          onChange={(e) => handleDishPhotoUpload(e.target.files)}
-                          className="hidden"
+                    {restaurantPhoto && (
+                      <div
+                        ref={restaurantPhotoPreviewRef}
+                        className={`mt-3 rounded-xl overflow-hidden aspect-square relative [touch-action:none] ${isDraggingRestaurantPhoto ? 'cursor-grabbing' : 'cursor-grab'}`}
+                        onPointerDown={handleRestaurantPhotoPointerDown}
+                        onPointerMove={handleRestaurantPhotoPointerMove}
+                        onPointerUp={handleRestaurantPhotoPointerUp}
+                        onPointerCancel={handleRestaurantPhotoPointerUp}
+                        onTouchStart={handleRestaurantPhotoTouchStart}
+                        onTouchMove={handleRestaurantPhotoTouchMove}
+                        onTouchEnd={handleRestaurantPhotoTouchEnd}
+                      >
+                        <CachedImage
+                          src={restaurantPhoto}
+                          alt="Restaurant preview"
+                          className="w-full h-full object-cover pointer-events-none select-none"
+                          style={{ objectPosition: `${restaurantPhotoPosition.x}% ${restaurantPhotoPosition.y}%`, transform: `scale(${restaurantPhotoZoom})` }}
+                          draggable={false}
                         />
                         <button
                           type="button"
-                          onClick={() => dishPhotoInputRef.current?.click()}
-                          disabled={isApiBusy}
-                          aria-label="Upload dish photos"
-                          title="Upload dish photos"
-                          className="h-11 w-11 rounded-full border border-gray-200 bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setRestaurantPhoto('');
+                            setRestaurantPhotoPosition({ x: 50, y: 50 });
+                            setRestaurantPhotoZoom(1);
+                            restaurantPhotoNextPositionRef.current = { x: 50, y: 50 };
+                            if (restaurantPhotoInputRef.current) {
+                              restaurantPhotoInputRef.current.value = '';
+                            }
+                          }}
+                          className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1"
+                          aria-label="Remove restaurant photo"
                         >
-                          <ImagePlus size={18} />
+                          <X size={14} />
+                        </button>
+                        <div className="absolute left-2 right-2 bottom-2 text-[11px] bg-black/60 text-white px-2 py-1 rounded-md text-center">
+                          Drag to pan, pinch to zoom
+                        </div>
+                      </div>
+                    )}
+                    {!restaurantPhoto && (
+                      <p className="mt-2 text-xs text-gray-500">You can skip photo and continue.</p>
+                    )}
+                  </div>
+
+                  <div className={addStep === 2 ? '' : 'hidden'}>
+                    <div className="mb-6 bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm font-bold text-indigo-900">Photo Pool</label>
+                      </div>
+                      <input
+                        ref={batchPhotoInputRef}
+                        type="file"
+                        accept="image/*,video/*"
+                        multiple
+                        onChange={(e) => handleBatchPhotoImport(e.target.files)}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => batchPhotoInputRef.current?.click()}
+                        disabled={isApiBusy}
+                        className="w-full bg-white text-indigo-600 border border-indigo-200 font-medium py-2.5 rounded-xl hover:bg-indigo-50 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 mb-3 shadow-sm"
+                      >
+                        <ImagePlus size={18} /> Select Multiple Photos
+                      </button>
+
+                      {pendingGallery.length > 0 && (
+                        <div className="flex gap-3 overflow-x-auto pb-3 snap-x mt-3">
+                          {pendingGallery.map((url, i) => (
+                            <div key={i} className="min-w-[140px] max-w-[140px] snap-center bg-white border border-gray-200 rounded-xl p-2 shrink-0 flex flex-col shadow-sm">
+                              <img src={url} alt="Pending" className="w-full h-24 object-cover rounded-lg mb-2" />
+                              <select
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    handleAssignPhoto(url, e.target.value);
+                                    e.target.value = ''; // Reset for next interaction
+                                  }
+                                }}
+                                className="w-full text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                value=""
+                              >
+                                <option value="" disabled>Assign to...</option>
+                                <option value="restaurant">Restaurant</option>
+                                {dishPhotos.map((d, idx) => (
+                                  <option key={d.id} value={d.id}>Dish: {d.name || `Dish ${idx + 1}`}</option>
+                                ))}
+                                <option value="new_dish">+ New Dish</option>
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveFromGallery(url)}
+                                className="mt-2 text-xs text-red-500 font-medium hover:text-red-600"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Set Location</label>
+                    <div className="space-y-2">
+                      {/* Address geocoding */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Address (optional)</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={newRestAddress}
+                            onChange={(e) => {
+                              setNewRestAddress(e.target.value);
+                              sessionStorage.setItem('draft_restAddress', e.target.value);
+                            }}
+                            placeholder="Street, landmark, city..."
+                            className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={isGeocodingAddress || !newRestAddress.trim()}
+                            onClick={() => void handleGeocodeAddressForForm()}
+                            className="px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                          >
+                            {isGeocodingAddress ? 'Findingâ€¦' : 'Find on Map'}
+                          </button>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-400">Enter address then tap "Find on Map" to drop the pin automatically.</p>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={isGeocodingAddress}
+                          onClick={() => {
+                            if (validCurrentPosition) {
+                              setLatLngSafely(validCurrentPosition);
+                            } else if (navigator.geolocation) {
+                              setIsGeocodingAddress(true);
+                              setAddFormError(null);
+                              navigator.geolocation.getCurrentPosition(
+                                (position) => {
+                                  const pos = L.latLng(position.coords.latitude, position.coords.longitude);
+                                  setLatLngSafely(pos);
+                                  setCurrentPosition(pos);
+                                  setIsGeocodingAddress(false);
+                                },
+                                (err) => {
+                                  let msg = err.message || 'Unable to fetch GPS location.';
+                                  if (msg.includes('secure origins') || msg.includes('Only secure origins')) {
+                                    msg = 'GPS requires HTTPS or localhost. Please type your address manually.';
+                                  }
+                                  setAddFormError(msg);
+                                  setIsGeocodingAddress(false);
+                                },
+                                { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+                              );
+                            } else {
+                              setAddFormError('Geolocation is not supported by this browser.');
+                            }
+                          }}
+                          className="flex-1 bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isGeocodingAddress ? 'Wait...' : 'Use GPS location'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLatLng(null)}
+                          className="flex-1 bg-gray-100 text-gray-700 font-medium py-2.5 rounded-xl hover:bg-gray-200 text-sm"
+                        >
+                          Tap map to pin
+                        </button>
+                      </div>
+
+                      <div ref={locationMapRef} className="h-72 overflow-hidden rounded-2xl border border-gray-200 bg-gray-100">
+                        <MapContainer
+                          center={validPinLatLng ? [validPinLatLng.lat, validPinLatLng.lng] : validCurrentPosition ? [validCurrentPosition.lat, validCurrentPosition.lng] : [18.9442, 72.8276]}
+                          zoom={15}
+                          className="h-full w-full"
+                          attributionControl={false}
+                        >
+                          <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+                          <NearbyPOIs />
+                          <MapClickHandler onClick={(event) => setLatLngSafely(event.latlng, undefined, true)} />
+                          <MapViewportUpdater center={validPinLatLng ? safeLatLng(validPinLatLng) : (validCurrentPosition ? safeLatLng(validCurrentPosition) : null)} />
+                          <MapContainerResizeFixer trigger={`${addStep}-${validPinLatLng ? `${validPinLatLng.lat}-${validPinLatLng.lng}` : validCurrentPosition ? `${validCurrentPosition.lat}-${validCurrentPosition.lng}` : 'default'}`} />
+                          {validPinLatLng && (
+                            <Marker
+                              position={[validPinLatLng.lat, validPinLatLng.lng]}
+                              draggable
+                              eventHandlers={{
+                                dragend: (event) => {
+                                  const marker = event.target;
+                                  const nextLatLng = marker.getLatLng();
+                                  setLatLngSafely({ lat: nextLatLng.lat, lng: nextLatLng.lng }, undefined, true);
+                                }
+                              }}
+                            />
+                          )}
+                        </MapContainer>
+
+                      </div>
+
+                      {!validPinLatLng ? (
+                        <div className="p-3 bg-orange-50 border border-orange-200 text-orange-600 rounded-xl text-center text-sm">
+                          No pin selected. You can skip and we will use your current/default location.
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-green-50 border border-green-200 text-green-700 rounded-xl text-center text-sm">
+                          ðŸ“ Pin set at {validPinLatLng.lat.toFixed(5)}, {validPinLatLng.lng.toFixed(5)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={addStep === 3 ? '' : 'hidden'}>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                        <input
+                          required
+                          value={newRestName}
+                          onChange={(e) => { setNewRestName(e.target.value); sessionStorage.setItem('draft_restName', e.target.value); }}
+                          className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                          placeholder="Restaurant name"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                        <textarea
+                          value={newRestNotes}
+                          onChange={(e) => { setNewRestNotes(e.target.value); sessionStorage.setItem('draft_restNotes', e.target.value); }}
+                          className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                          placeholder="Atmosphere, cuisine type..."
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Location Name</label>
+                          <input
+                            value={newRestLocationName}
+                            onChange={(e) => { setNewRestLocationName(e.target.value); sessionStorage.setItem('draft_restLocationName', e.target.value); }}
+                            className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                            placeholder="Fort"
+                          />
+                          <p className="mt-1 text-xs text-gray-500">One word area name, used in filters.</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                          <input
+                            value={newRestAddress}
+                            onChange={(e) => { setNewRestAddress(e.target.value); sessionStorage.setItem('draft_restAddress', e.target.value); }}
+                            className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                            placeholder="Street and landmark"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                          <select
+                            value={restaurantTypeSelection}
+                            onChange={(event) => setRestaurantTypeSelection(event.target.value)}
+                            className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                          >
+                            <option value="">Select type</option>
+                            {typeOptions.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                            <option value="__custom__">Add new type...</option>
+                          </select>
+                          {restaurantTypeSelection === '__custom__' && (
+                            <input
+                              value={customRestaurantType}
+                              onChange={(event) => setCustomRestaurantType(event.target.value)}
+                              className="mt-2 w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                              placeholder="Enter new type"
+                            />
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Cuisine</label>
+                          <select
+                            value={restaurantCuisineSelection}
+                            onChange={(event) => setRestaurantCuisineSelection(event.target.value)}
+                            className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                          >
+                            <option value="">Select cuisine</option>
+                            {cuisineOptions.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                            <option value="__custom__">Add new cuisine...</option>
+                          </select>
+                          {restaurantCuisineSelection === '__custom__' && (
+                            <input
+                              value={customRestaurantCuisine}
+                              onChange={(event) => setCustomRestaurantCuisine(event.target.value)}
+                              className="mt-2 w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                              placeholder="Enter new cuisine"
+                            />
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Cost for two (â‚¹)</label>
+                        <input name="costForTwo" type="number" min="0" value={draftCostForTwo} onChange={(e) => setDraftCostForTwo(e.target.value)} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none" placeholder="600" />
+                      </div>
+
+                      <div className="pt-2 border-t border-gray-200">
+                        <button
+                          type="button"
+                          onClick={() => setShowDishBuilder((prev) => !prev)}
+                          className="text-sm font-semibold text-gray-700"
+                        >
+                          {showDishBuilder ? 'Hide dish editor' : 'Add dishes now'}
                         </button>
 
-                        {dishPhotos.length === 0 ? (
-                          <p className="text-xs text-gray-400">You can skip this and add dishes later from details page.</p>
-                        ) : (
-                          <div className="space-y-3">
-                            {dishPhotos.map((dish) => (
-                              <div key={dish.id} className="border border-gray-200 rounded-xl p-3 space-y-3">
-                                {dish.imageStorageUrl && (
-                                  <div
-                                    className={`w-full rounded-lg overflow-hidden relative [touch-action:none] ${draggingDishPhotoId === dish.id ? 'cursor-grabbing' : 'cursor-grab'}`}
-                                    style={{ height: '12rem' }}
-                                    onPointerDown={(event) => handleDishPhotoPointerDown(dish.id, event)}
-                                    onPointerMove={handleDishPhotoPointerMove}
-                                    onPointerUp={handleDishPhotoPointerUp}
-                                    onPointerCancel={handleDishPhotoPointerUp}
-                                    onTouchStart={(event) => handleDishPhotoTouchStart(dish.id, event)}
-                                    onTouchMove={(event) => handleDishPhotoTouchMove(dish.id, event)}
-                                    onTouchEnd={(event) => handleDishPhotoTouchEnd(dish.id, event)}
-                                  >
-                                    <CachedImage
-                                      src={dish.imageStorageUrl}
-                                      alt="Dish"
-                                      className="w-full h-full object-cover pointer-events-none select-none"
-                                      style={{ objectPosition: `${dish.photoPosition.x}% ${dish.photoPosition.y}%`, transform: `scale(${dish.photoZoom})` }}
-                                      draggable={false}
-                                    />
+                        {showDishBuilder && (
+                          <div className="space-y-3 mt-3">
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-sm font-semibold text-gray-700">Dish cards</h3>
+                              <button
+                                type="button"
+                                onClick={addEmptyDishCard}
+                                className="text-sm font-semibold text-red-500"
+                              >
+                                + Add card
+                              </button>
+                            </div>
+                            <input
+                              ref={dishPhotoInputRef}
+                              type="file"
+                              accept="image/*,video/*"
+                              multiple
+                              onChange={(e) => handleDishPhotoUpload(e.target.files)}
+                              className="hidden"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => dishPhotoInputRef.current?.click()}
+                              disabled={isApiBusy}
+                              aria-label="Upload dish photos"
+                              title="Upload dish photos"
+                              className="h-11 w-11 rounded-full border border-gray-200 bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              <ImagePlus size={18} />
+                            </button>
+
+                            {dishPhotos.length === 0 ? (
+                              <p className="text-xs text-gray-400">You can skip this and add dishes later from details page.</p>
+                            ) : (
+                              <div className="space-y-3">
+                                {dishPhotos.map((dish) => (
+                                  <div key={dish.id} className="border border-gray-200 rounded-xl p-3 space-y-3">
+                                    {dish.imageStorageUrl && (
+                                      <div
+                                        className={`w-full rounded-lg overflow-hidden relative [touch-action:none] ${draggingDishPhotoId === dish.id ? 'cursor-grabbing' : 'cursor-grab'}`}
+                                        style={{ height: '12rem' }}
+                                        onPointerDown={(event) => handleDishPhotoPointerDown(dish.id, event)}
+                                        onPointerMove={handleDishPhotoPointerMove}
+                                        onPointerUp={handleDishPhotoPointerUp}
+                                        onPointerCancel={handleDishPhotoPointerUp}
+                                        onTouchStart={(event) => handleDishPhotoTouchStart(dish.id, event)}
+                                        onTouchMove={(event) => handleDishPhotoTouchMove(dish.id, event)}
+                                        onTouchEnd={(event) => handleDishPhotoTouchEnd(dish.id, event)}
+                                      >
+                                        <CachedImage
+                                          src={dish.imageStorageUrl}
+                                          alt="Dish"
+                                          className="w-full h-full object-cover pointer-events-none select-none"
+                                          style={{ objectPosition: `${dish.photoPosition.x}% ${dish.photoPosition.y}%`, transform: `scale(${dish.photoZoom})` }}
+                                          draggable={false}
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            updateDishCard(dish.id, {
+                                              imageStorageUrl: '',
+                                              photoPosition: { x: 50, y: 50 },
+                                              photoZoom: 1
+                                            });
+                                          }}
+                                          className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1"
+                                          aria-label="Remove dish photo"
+                                        >
+                                          <X size={12} />
+                                        </button>
+                                        <div className="absolute left-2 right-2 bottom-2 text-[10px] bg-black/60 text-white px-2 py-1 rounded text-center">
+                                          Drag to pan, pinch to zoom
+                                        </div>
+                                      </div>
+                                    )}
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-1">Dish Name</label>
+                                      <input
+                                        value={dish.name}
+                                        onChange={(e) => updateDishCard(dish.id, { name: e.target.value })}
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                                        placeholder="Dish name"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-1">Rating</label>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        max="5"
+                                        value={dish.rating}
+                                        onChange={(e) => updateDishCard(dish.id, { rating: Number(e.target.value) })}
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-1">Actual Price (â‚¹)</label>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        value={dish.actualPrice}
+                                        onChange={(e) => updateDishCard(dish.id, { actualPrice: e.target.value })}
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                                        placeholder="250"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-1">Price Icons</label>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        max="3"
+                                        value={dish.priceLevel}
+                                        onChange={(e) => updateDishCard(dish.id, { priceLevel: Number(e.target.value) })}
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                                      />
+                                      <p className="mt-1 text-xs text-gray-500 inline-flex items-center gap-1">
+                                        Preview:
+                                        <PriceLevelIcon level={Math.min(3, Math.max(1, dish.priceLevel))} />
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                                      <textarea
+                                        value={dish.review}
+                                        onChange={(e) => updateDishCard(dish.id, { review: e.target.value })}
+                                        rows={2}
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                                        placeholder="Short description"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-1">Review Date</label>
+                                      <input
+                                        type="date"
+                                        value={dish.reviewDate}
+                                        onChange={(e) => updateDishCard(dish.id, { reviewDate: e.target.value })}
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                                      />
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                      <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Dish Cuisine</label>
+                                        <select
+                                          value={dish.isCustomCuisine ? '__custom__' : dish.cuisine}
+                                          onChange={(e) => {
+                                            if (e.target.value === '__custom__') {
+                                              updateDishCard(dish.id, { isCustomCuisine: true, cuisine: '' });
+                                              return;
+                                            }
+                                            updateDishCard(dish.id, { isCustomCuisine: false, cuisine: e.target.value });
+                                          }}
+                                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                                        >
+                                          <option value="">Select cuisine</option>
+                                          {cuisineOptions.map((option) => (
+                                            <option key={option} value={option}>{option}</option>
+                                          ))}
+                                          <option value="__custom__">Add new cuisine...</option>
+                                        </select>
+                                        {dish.isCustomCuisine && (
+                                          <input
+                                            value={dish.cuisine}
+                                            onChange={(e) => updateDishCard(dish.id, { cuisine: e.target.value })}
+                                            className="mt-2 w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
+                                            placeholder="Enter new cuisine"
+                                          />
+                                        )}
+                                      </div>
+                                      <div>
+                                        <TagSelector
+                                          label="Flavor Tags"
+                                          selectedTags={dish.flavorTags}
+                                          availableTags={flavorTags}
+                                          onChange={(nextTags) => updateDishCard(dish.id, { flavorTags: nextTags })}
+                                          onCreateTag={ensureFlavorTag}
+                                          placeholder="Type to search or add"
+                                        />
+                                      </div>
+                                    </div>
                                     <button
                                       type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        updateDishCard(dish.id, {
-                                          imageStorageUrl: '',
-                                          photoPosition: { x: 50, y: 50 },
-                                          photoZoom: 1
-                                        });
-                                      }}
-                                      className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1"
-                                      aria-label="Remove dish photo"
+                                      onClick={() => removeDishCard(dish.id)}
+                                      className="text-xs text-red-500 font-semibold"
                                     >
-                                      <X size={12} />
+                                      Remove dish
                                     </button>
-                                    <div className="absolute left-2 right-2 bottom-2 text-[10px] bg-black/60 text-white px-2 py-1 rounded text-center">
-                                      Drag to pan, pinch to zoom
-                                    </div>
                                   </div>
-                                )}
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">Dish Name</label>
-                                  <input
-                                    value={dish.name}
-                                    onChange={(e) => updateDishCard(dish.id, { name: e.target.value })}
-                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                                    placeholder="Dish name"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">Rating</label>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max="5"
-                                    value={dish.rating}
-                                    onChange={(e) => updateDishCard(dish.id, { rating: Number(e.target.value) })}
-                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">Actual Price (₹)</label>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    value={dish.actualPrice}
-                                    onChange={(e) => updateDishCard(dish.id, { actualPrice: e.target.value })}
-                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                                    placeholder="250"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">Price Icons</label>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max="3"
-                                    value={dish.priceLevel}
-                                    onChange={(e) => updateDishCard(dish.id, { priceLevel: Number(e.target.value) })}
-                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                                  />
-                                  <p className="mt-1 text-xs text-gray-500 inline-flex items-center gap-1">
-                                    Preview:
-                                    <PriceLevelIcon level={Math.min(3, Math.max(1, dish.priceLevel))} />
-                                  </p>
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                                  <textarea
-                                    value={dish.review}
-                                    onChange={(e) => updateDishCard(dish.id, { review: e.target.value })}
-                                    rows={2}
-                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                                    placeholder="Short description"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">Review Date</label>
-                                  <input
-                                    type="date"
-                                    value={dish.reviewDate}
-                                    onChange={(e) => updateDishCard(dish.id, { reviewDate: e.target.value })}
-                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                                  />
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Dish Cuisine</label>
-                                    <select
-                                      value={dish.isCustomCuisine ? '__custom__' : dish.cuisine}
-                                      onChange={(e) => {
-                                        if (e.target.value === '__custom__') {
-                                          updateDishCard(dish.id, { isCustomCuisine: true, cuisine: '' });
-                                          return;
-                                        }
-                                        updateDishCard(dish.id, { isCustomCuisine: false, cuisine: e.target.value });
-                                      }}
-                                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                                    >
-                                      <option value="">Select cuisine</option>
-                                      {cuisineOptions.map((option) => (
-                                        <option key={option} value={option}>{option}</option>
-                                      ))}
-                                      <option value="__custom__">Add new cuisine...</option>
-                                    </select>
-                                    {dish.isCustomCuisine && (
-                                      <input
-                                        value={dish.cuisine}
-                                        onChange={(e) => updateDishCard(dish.id, { cuisine: e.target.value })}
-                                        className="mt-2 w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
-                                        placeholder="Enter new cuisine"
-                                      />
-                                    )}
-                                  </div>
-                                  <div>
-                                    <TagSelector
-                                      label="Flavor Tags"
-                                      selectedTags={dish.flavorTags}
-                                      availableTags={flavorTags}
-                                      onChange={(nextTags) => updateDishCard(dish.id, { flavorTags: nextTags })}
-                                      onCreateTag={ensureFlavorTag}
-                                      placeholder="Type to search or add"
-                                    />
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => removeDishCard(dish.id)}
-                                  className="text-xs text-red-500 font-semibold"
-                                >
-                                  Remove dish
-                                </button>
+                                ))}
                               </div>
-                            ))}
+                            )}
                           </div>
                         )}
                       </div>
-                    )}
+                    </div>
                   </div>
-                </div>
-              </div>
-              </fieldset>
+                </fieldset>
 
-              {addFormError && (
-                <p className="text-sm text-red-600 font-medium">{addFormError}</p>
-              )}
+                {addFormError && (
+                  <p className="text-sm text-red-600 font-medium">{addFormError}</p>
+                )}
 
-              <div className="sticky bottom-0 bg-white/95 backdrop-blur flex items-center justify-between gap-3 pt-2">
-                <button
-                  type="button"
-                  disabled={isApiBusy}
-                  onClick={() => setAddStep((prev) => Math.max(1, prev - 1))}
-                  className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  Back
-                </button>
-                {addStep < 3 ? (
+                <div className="sticky bottom-0 bg-white/95 backdrop-blur flex items-center justify-between gap-3 pt-2">
                   <button
                     type="button"
                     disabled={isApiBusy}
-                    onClick={() => setAddStep((prev) => Math.min(3, prev + 1))}
-                    className="flex-[2] py-2.5 rounded-xl bg-black text-white font-medium hover:bg-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
+                    onClick={() => setAddStep((prev) => Math.max(1, prev - 1))}
+                    className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    Next
+                    Back
                   </button>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={isApiBusy}
-                    className="flex-[2] py-2.5 rounded-xl bg-red-500 text-white font-medium hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  >
-                    {isSavingRestaurant ? <Loader2 size={16} className="animate-spin" /> : null}
-                    {isSavingRestaurant ? 'Saving...' : 'Save Restaurant'}
-                  </button>
-                )}
-              </div>
-            </form>
+                  {addStep < 3 ? (
+                    <button
+                      type="button"
+                      disabled={isApiBusy}
+                      onClick={() => setAddStep((prev) => Math.min(3, prev + 1))}
+                      className="flex-[2] py-2.5 rounded-xl bg-black text-white font-medium hover:bg-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      disabled={isApiBusy}
+                      className="flex-[2] py-2.5 rounded-xl bg-red-500 text-white font-medium hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {isSavingRestaurant ? <Loader2 size={16} className="animate-spin" /> : null}
+                      {isSavingRestaurant ? 'Saving...' : 'Save Restaurant'}
+                    </button>
+                  )}
+                </div>
+              </form>
             )}
           </motion.div>
         )}

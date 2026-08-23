@@ -101,3 +101,30 @@ export interface AppEvent {
   created_at: string;
   user_id?: string;
 }
+
+/**
+ * Returns true when the given restaurant has at least one dish associated with it.
+ * Used to decide whether an incomplete restaurant entry should be surfaced to
+ * regular (non-admin) viewers.
+ */
+export const restaurantHasDishes = (
+  restaurant: Pick<Restaurant, 'id'> | undefined | null,
+  dishes: Pick<Dish, 'restaurantId'>[],
+): boolean => {
+  if (!restaurant) return false;
+  return dishes.some((dish) => dish.restaurantId === restaurant.id);
+};
+
+/**
+ * A restaurant is visible on the public views only when an admin is viewing
+ * (edit mode) or the restaurant already has at least one dish listed under it.
+ *
+ * - Logged-in admins always see every restaurant so they can manage incomplete
+ *   entries (the notifications bell also warns them about missing dishes).
+ * - Regular viewers only see restaurants that already have dishes added.
+ */
+export const isRestaurantVisibleToUser = (
+  restaurant: Pick<Restaurant, 'id'> | undefined | null,
+  dishes: Pick<Dish, 'restaurantId'>[],
+  isEditMode: boolean,
+): boolean => isEditMode || restaurantHasDishes(restaurant, dishes);

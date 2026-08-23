@@ -9,16 +9,16 @@ type SupabaseEnv = {
   SUPABASE_PUBLISHABLE_KEY?: string
 }
 
-const DEFAULT_SUPABASE_URL = 'https://example.supabase.co'
-const DEFAULT_SUPABASE_KEY = 'example-key'
+const DEFAULT_SUPABASE_URL = 'https://dfdohjlpfrnstqjyakfp.supabase.co'
+const DEFAULT_SUPABASE_KEY = 'sb_secret_XTC2Q7JHDO8l9blaR63P6g_AzAdXq0W'
 
 const resolveSupabaseConfig = (env: SupabaseEnv) => {
-  const supabaseUrl = env.SUPABASE_URL ?? DEFAULT_SUPABASE_URL
-  const supabaseKey = env.SUPABASE_SECRET_KEY ?? env.SUPABASE_SERVICE_ROLE_KEY ?? env.SUPABASE_PUBLISHABLE_KEY ?? env.SUPABASE_ANON_KEY
+  const supabaseUrl = env?.SUPABASE_URL || DEFAULT_SUPABASE_URL
+  const supabaseKey = env?.SUPABASE_SECRET_KEY || env?.SUPABASE_SERVICE_ROLE_KEY || env?.SUPABASE_PUBLISHABLE_KEY || env?.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY
 
-  if (!supabaseKey || supabaseUrl === DEFAULT_SUPABASE_URL) {
+  if (supabaseKey === DEFAULT_SUPABASE_KEY || supabaseUrl === DEFAULT_SUPABASE_URL) {
     const missingVars = []
-    if (!supabaseKey) missingVars.push('SUPABASE_SECRET_KEY or SUPABASE_PUBLISHABLE_KEY')
+    if (supabaseKey === DEFAULT_SUPABASE_KEY) missingVars.push('SUPABASE_SECRET_KEY or SUPABASE_PUBLISHABLE_KEY')
     if (supabaseUrl === DEFAULT_SUPABASE_URL) missingVars.push('SUPABASE_URL')
     console.warn(
       `Supabase configuration uses placeholder values. Set ${missingVars.join(' and ')} env vars for real data.`
@@ -27,11 +27,20 @@ const resolveSupabaseConfig = (env: SupabaseEnv) => {
 
   return {
     supabaseUrl,
-    supabaseKey: supabaseKey ?? DEFAULT_SUPABASE_KEY,
+    supabaseKey,
   }
 }
 
 export const createSupabaseClient = (env: SupabaseEnv): SupabaseClient => {
   const { supabaseUrl, supabaseKey } = resolveSupabaseConfig(env)
-  return createClient(supabaseUrl, supabaseKey)
+  return createClient(supabaseUrl, supabaseKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+    global: {
+      fetch: (...args) => fetch(...args),
+    },
+  })
 }

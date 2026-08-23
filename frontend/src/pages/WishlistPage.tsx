@@ -3,11 +3,14 @@ import { Link } from 'react-router-dom';
 import { Bookmark, Star, MapPin, ChevronRight } from 'lucide-react';
 import CachedImage from '../components/CachedImage';
 import { getCuisineColor } from '../lib/instagramProcessing';
+import { isRestaurantVisibleToUser } from '../types';
 
 export default function WishlistPage() {
-  const { restaurants, wishlist, dishes } = useStore();
+  const { restaurants, wishlist, dishes, editMode } = useStore();
 
-  const wishlistRestaurants = restaurants.filter((r) => wishlist.includes(r.id));
+  const wishlistRestaurants = restaurants
+    .filter((r) => wishlist.includes(r.id))
+    .filter((r) => isRestaurantVisibleToUser(r, dishes, editMode));
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
