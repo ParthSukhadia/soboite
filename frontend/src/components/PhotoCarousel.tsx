@@ -41,7 +41,16 @@ export default function PhotoCarousel({
     oy: number;
   } | null>(null);
 
-  const safePhotos = useMemo(() => photos.filter((photo) => Boolean(photo.url)), [photos]);
+  const safePhotos = useMemo(() => {
+    const validPhotos = photos.filter((photo) => Boolean(photo.url));
+    return [...validPhotos].sort((a, b) => {
+      const aIsVideo = a.type === 'video' || a.url.startsWith('data:video/') || !!a.url.match(/\.(mp4|webm|mov|ogg)$/i);
+      const bIsVideo = b.type === 'video' || b.url.startsWith('data:video/') || !!b.url.match(/\.(mp4|webm|mov|ogg)$/i);
+      if (aIsVideo && !bIsVideo) return -1;
+      if (!aIsVideo && bIsVideo) return 1;
+      return 0;
+    });
+  }, [photos]);
   const clampedIndex = Math.max(0, Math.min(index, safePhotos.length - 1));
   const activePhoto = safePhotos[clampedIndex];
 

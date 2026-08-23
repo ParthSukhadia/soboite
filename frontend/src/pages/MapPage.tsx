@@ -332,6 +332,7 @@ export default function MapPage() {
     isCustomCuisine: boolean;
   }>>([]);
   const [pendingGallery, setPendingGallery] = useState<string[]>([]);
+  const [isImportingBatch, setIsImportingBatch] = useState(false);
   const cardContainerRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const scrollTimeoutRef = useRef<number | null>(null);
@@ -930,6 +931,9 @@ export default function MapPage() {
 
   const buildPositionedRestaurantPhoto = async () => {
     if (!restaurantPhoto) return undefined;
+    if (restaurantPhoto.startsWith('data:video/') || restaurantPhoto.match(/\.(mp4|webm|mov|ogg)$/i)) {
+      return restaurantPhoto;
+    }
 
     const image = new Image();
     image.src = restaurantPhoto;
@@ -984,6 +988,11 @@ export default function MapPage() {
     photoPosition: { x: number; y: number },
     photoZoom: number
   ) => {
+    if (!imageStorageUrl) return undefined;
+    if (imageStorageUrl.startsWith('data:video/') || imageStorageUrl.match(/\.(mp4|webm|mov|ogg)$/i)) {
+      return imageStorageUrl;
+    }
+
     const image = new Image();
     image.src = imageStorageUrl;
     await image.decode();
@@ -1047,9 +1056,14 @@ export default function MapPage() {
 
   const handleBatchPhotoImport = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const urls = await Promise.all(Array.from(files).map(fileToDataUrl));
-    setPendingGallery(prev => [...prev, ...urls]);
-    if (batchPhotoInputRef.current) batchPhotoInputRef.current.value = '';
+    setIsImportingBatch(true);
+    try {
+      const urls = await Promise.all(Array.from(files).map(fileToDataUrl));
+      setPendingGallery(prev => [...prev, ...urls]);
+    } finally {
+      setIsImportingBatch(false);
+      if (batchPhotoInputRef.current) batchPhotoInputRef.current.value = '';
+    }
   };
 
   const handleDishPhotoUpload = async (files: FileList | null) => {
@@ -2358,17 +2372,28 @@ export default function MapPage() {
                   <button
                     type="button"
                     onClick={() => batchPhotoInputRef.current?.click()}
-                    disabled={isApiBusy}
+                    disabled={isApiBusy || isImportingBatch}
                     className="w-full bg-white text-indigo-600 border border-indigo-200 font-medium py-2.5 rounded-xl hover:bg-indigo-50 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 mb-3 shadow-sm"
                   >
                     <ImagePlus size={18} /> Select Multiple Photos
                   </button>
                   
+                  {isImportingBatch && (
+                    <div className="flex flex-col items-center justify-center py-6 px-4 bg-gray-50 rounded-xl border border-gray-100 mb-3">
+                      <Loader2 className="animate-spin text-indigo-500 mb-2" size={24} />
+                      <span className="text-sm text-gray-500 font-medium tracking-wide">Loading media...</span>
+                    </div>
+                  )}
+
                   {pendingGallery.length > 0 && (
                     <div className="flex gap-3 overflow-x-auto pb-3 snap-x mt-3">
                       {pendingGallery.map((url, i) => (
                         <div key={i} className="min-w-[140px] max-w-[140px] snap-center bg-white border border-gray-200 rounded-xl p-2 shrink-0 flex flex-col shadow-sm">
-                          <img src={url} alt="Pending" className="w-full h-24 object-cover rounded-lg mb-2" />
+                          {url.startsWith('data:video/') || url.match(/\.(mp4|webm|mov|ogg)$/i) ? (
+                            <video src={url} className="w-full h-24 object-cover rounded-lg mb-2" autoPlay muted loop playsInline />
+                          ) : (
+                            <img src={url} alt="Pending" className="w-full h-24 object-cover rounded-lg mb-2" />
+                          )}
                           <select
                             onChange={(e) => {
                               if (e.target.value) {

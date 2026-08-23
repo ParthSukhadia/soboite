@@ -1,5 +1,5 @@
 import React from 'react';
-import { AbsoluteFill, Img, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Img, interpolate, spring, useCurrentFrame, useVideoConfig, staticFile } from 'remotion';
 
 interface OutroSceneProps {
   logoUrl?: string;
@@ -51,7 +51,7 @@ export const OutroScene: React.FC<OutroSceneProps> = ({ logoUrl, image }) => {
         >
           {logoUrl ? (
             <Img
-              src={logoUrl}
+              src={logoUrl.startsWith('/') ? staticFile(logoUrl.slice(1)) : logoUrl}
               style={{
                 width: '180px',
                 height: '180px',

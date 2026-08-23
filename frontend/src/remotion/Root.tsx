@@ -28,7 +28,7 @@ const defaultReelProps = {
       name: 'Keema Pao',
       rating: 4.9,
       price: 650,
-      image: 'https://images.unsplash.com/photo-1544025162-8315ea07f440',
+      image: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4',
       pros: ['Incredible spices', 'Soft bread'],
       cons: [],
       review: 'Must try!'

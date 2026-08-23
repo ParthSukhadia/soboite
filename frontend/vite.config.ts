@@ -20,13 +20,13 @@ const remotionRenderPlugin = () => {
               const parsedBody = JSON.parse(body);
               const compositionId = parsedBody.compositionId || 'RestaurantStory';
               
-              const propsPath = path.resolve('public/temp-props.json');
+              const propsPath = path.resolve(`public/temp-props-${Date.now()}.json`);
               fs.writeFileSync(propsPath, body);
               
               const outPath = path.resolve(`temp-story-${Date.now()}.mp4`);
               
               // Run remotion
-              exec(`npx remotion render src/remotion/index.ts ${compositionId} ${outPath} --props=public/temp-props.json`, { maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
+              exec(`npx remotion render src/remotion/index.ts ${compositionId} "${outPath}" --props="${propsPath}"`, { maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
                 if (err) {
                   res.statusCode = 500;
                   res.end(JSON.stringify({ error: err.message, stderr }));
@@ -40,11 +40,11 @@ const remotionRenderPlugin = () => {
                 const stream = fs.createReadStream(outPath);
                 stream.pipe(res);
                 
-                stream.on('end', () => {
+                res.on('finish', () => {
                   // Clean up the temp files
                   try {
-                    fs.unlinkSync(outPath);
-                    fs.unlinkSync(propsPath);
+                    if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
+                    if (fs.existsSync(propsPath)) fs.unlinkSync(propsPath);
                   } catch (e) {}
                 });
               });

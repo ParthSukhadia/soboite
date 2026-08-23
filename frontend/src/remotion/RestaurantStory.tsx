@@ -303,7 +303,7 @@ export const RestaurantStory: React.FC<RestaurantStoryProps> = ({
         >
           {logoUrl ? (
             <Img
-              src={logoUrl}
+              src={logoUrl.startsWith('/') ? staticFile(logoUrl.slice(1)) : logoUrl}
               style={{
                 width: '120px',
                 height: '120px',
