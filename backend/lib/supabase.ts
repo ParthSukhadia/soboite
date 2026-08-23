@@ -10,7 +10,7 @@ type SupabaseEnv = {
 }
 
 const DEFAULT_SUPABASE_URL = 'https://dfdohjlpfrnstqjyakfp.supabase.co'
-const DEFAULT_SUPABASE_KEY = 'sb_secret_XTC2Q7JHDO8l9blaR63P6g_AzAdXq0W'
+const DEFAULT_SUPABASE_KEY = 'sb_secret_placeholder'
 
 const resolveSupabaseConfig = (env: SupabaseEnv) => {
   const supabaseUrl = env?.SUPABASE_URL || DEFAULT_SUPABASE_URL
