@@ -206,6 +206,7 @@ const normalizeDbRestaurant = (r: any): Restaurant => {
     instaPublished: Boolean(r.insta_published ?? r.instaPublished),
     instaPublishedAt: r.insta_published_at ?? r.instaPublishedAt,
     instaEditedPhotoUrl: r.insta_edited_photo_url ?? r.instaEditedPhotoUrl,
+    instaCaption: r.instagram_caption ?? r.insta_caption ?? r.instaCaption,
     poll1Count: r.poll_1_count ?? r.poll1Count ?? ((r.name?.length || 5) * 2),
     poll2Count: r.poll_2_count ?? r.poll2Count ?? (r.name?.length || 5),
     poll3Count: r.poll_3_count ?? r.poll3Count ?? ((r.name?.length || 5) % 5),

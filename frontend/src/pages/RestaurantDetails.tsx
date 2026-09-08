@@ -372,7 +372,7 @@ export default function RestaurantDetails() {
   const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
   const [isGeneratingEmbeddings, setIsGeneratingEmbeddings] = useState(false);
 
-  const handleGenerateInsightsForEditingDish = async () => {
+  const () => handleGenerateInsightsForEditingDish(dish.id) = async () => {
     if (!editingDishDraft) return;
     setIsGeneratingInsights(true);
     try {
@@ -927,7 +927,7 @@ export default function RestaurantDetails() {
     if (!editingDishDraft || !files || files.length === 0 || isApiBusy) return;
     const incoming = await filesToPhotos(files);
     const combined = [...editingDishDraft.photos, ...incoming];
-    updateEditingDraft({
+    updateEditingDraft(dish.id, {
       photos: combined,
       primaryPhotoId: resolvePrimaryPhotoId(
         combined,
@@ -1126,7 +1126,7 @@ export default function RestaurantDetails() {
 
       const nextReviews = [firstReview, ...existingReviews.slice(1)];
 
-      await updateDish(editingDishId, {
+      await updateDish(dishId, {
         name: editingDishDraft.name.trim(),
         rating: Math.max(1, Math.min(5, editingDishDraft.rating)),
         priceLevel: editingDishDraft.priceLevel,
@@ -1681,7 +1681,8 @@ export default function RestaurantDetails() {
                 dishPhotos,
                 dish.primaryPhotoId,
               );
-              const isEditing = editingDishId === dish.id && editingDishDraft;
+              const isEditing = !!editingDishDrafts[dish.id];
+              const editingDishDraft = editingDishDrafts[dish.id];
               
               const isFirstRecommended = index === 0 && dish.isRecommended;
               const isFirstOther = index === recommendedDishes.length;
@@ -1708,7 +1709,7 @@ export default function RestaurantDetails() {
                         <button
                           type="button"
                           disabled={isApiBusy}
-                          onClick={() => openEditDish(dish)}
+                          onClick={() => openEditDish()}
                           className="p-2 rounded-full border border-gray-200 bg-white text-gray-500 disabled:opacity-60 disabled:cursor-not-allowed"
                           aria-label="Edit dish"
                         >
@@ -1929,7 +1930,7 @@ export default function RestaurantDetails() {
                           <input
                             value={editingDishDraft.name}
                             onChange={(event) =>
-                              updateEditingDraft({ name: event.target.value })
+                              updateEditingDraft(dish.id, { name: event.target.value })
                             }
                             className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl"
                           />
@@ -1949,7 +1950,7 @@ export default function RestaurantDetails() {
                                     type="button"
                                     disabled={isApiBusy}
                                     onClick={() => {
-                                      updateEditingDraft({ rating: star });
+                                      updateEditingDraft(dish.id, { rating: star });
                                       void handleInlineDishRatingUpdate(dish, star);
                                     }}
                                     className={`transition-colors ${filled ? "text-yellow-400" : "text-gray-300"} disabled:opacity-70 disabled:cursor-not-allowed`}
@@ -1973,7 +1974,7 @@ export default function RestaurantDetails() {
                               min="1"
                               value={editingDishDraft.actualPrice}
                               onChange={(event) =>
-                                updateEditingDraft({
+                                updateEditingDraft(dish.id, {
                                   actualPrice: event.target.value,
                                 })
                               }
@@ -1988,7 +1989,7 @@ export default function RestaurantDetails() {
                               type="text"
                               value={editingDishDraft.serves}
                               onChange={(event) =>
-                                updateEditingDraft({
+                                updateEditingDraft(dish.id, {
                                   serves: event.target.value,
                                 })
                               }
@@ -2008,7 +2009,7 @@ export default function RestaurantDetails() {
                                 key={level}
                                 type="button"
                                 onClick={() =>
-                                  updateEditingDraft({
+                                  updateEditingDraft(dish.id, {
                                     priceLevel: level as 1 | 2 | 3,
                                   })
                                 }
@@ -2028,7 +2029,7 @@ export default function RestaurantDetails() {
                             rows={3}
                             value={editingDishDraft.review}
                             onChange={(event) =>
-                              updateEditingDraft({
+                              updateEditingDraft(dish.id, {
                                 review: event.target.value,
                               })
                             }
@@ -2045,7 +2046,7 @@ export default function RestaurantDetails() {
                               type="date"
                               value={editingDishDraft.reviewDate}
                               onChange={(event) =>
-                                updateEditingDraft({
+                                updateEditingDraft(dish.id, {
                                   reviewDate: event.target.value,
                                 })
                               }
@@ -2059,7 +2060,7 @@ export default function RestaurantDetails() {
                             <select
                               value={editingDishDraft.cuisine}
                               onChange={(event) =>
-                                updateEditingDraft({
+                                updateEditingDraft(dish.id, {
                                   cuisine: event.target.value,
                                 })
                               }
@@ -2079,7 +2080,7 @@ export default function RestaurantDetails() {
                           <TagSelector
                             selectedTags={editingDishDraft.tags}
                             availableTags={flavorTags}
-                            onChange={(tags) => updateEditingDraft({ tags })}
+                            onChange={(tags) => updateEditingDraft(dish.id, { tags })}
                             onCreateTag={ensureFlavorTag}
                             placeholder="Type to search or add"
                           />
@@ -2094,13 +2095,13 @@ export default function RestaurantDetails() {
                             primaryPhotoId={editingDishDraft.primaryPhotoId}
                             editable
                             onPrimaryChange={(photoId) =>
-                              updateEditingDraft({ primaryPhotoId: photoId })
+                              updateEditingDraft(dish.id, { primaryPhotoId: photoId })
                             }
                             onRemovePhoto={(photoId) => {
                               const next = editingDishDraft.photos.filter(
                                 (photo) => photo.id !== photoId,
                               );
-                              updateEditingDraft({
+                              updateEditingDraft(dish.id, {
                                 photos: next,
                                 primaryPhotoId: resolvePrimaryPhotoId(
                                   next,
@@ -2117,7 +2118,7 @@ export default function RestaurantDetails() {
                             accept="image/*,video/*"
                             multiple
                             onChange={(event) =>
-                              addPhotosToEditingDish(event.target.files)
+                              addPhotosToEditingDish(dish.id, event.target.files)
                             }
                             className="hidden"
                           />
@@ -2140,7 +2141,7 @@ export default function RestaurantDetails() {
                             <button
                               type="button"
                               disabled={isGeneratingInsights}
-                              onClick={handleGenerateInsightsForEditingDish}
+                              onClick={() => handleGenerateInsightsForEditingDish(dish.id)}
                               className="text-xs inline-flex items-center gap-1 font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded border border-indigo-200 hover:bg-indigo-100 disabled:opacity-50"
                               title="Generate Pros & Cons with Gemini"
                             >
@@ -2153,7 +2154,7 @@ export default function RestaurantDetails() {
                               <label className="block text-sm font-medium text-green-700">Pros</label>
                               <button
                                 type="button"
-                                onClick={() => updateEditingDraft({ pros: [...(editingDishDraft.pros || []), ''] })}
+                                onClick={() => updateEditingDraft(dish.id, { pros: [...(editingDishDraft.pros || []), ''] })}
                                 className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-200 hover:bg-green-100"
                               >
                                 + Add Pro
@@ -2167,7 +2168,7 @@ export default function RestaurantDetails() {
                                   onChange={(e) => {
                                     const next = [...(editingDishDraft.pros || [])];
                                     next[idx] = e.target.value;
-                                    updateEditingDraft({ pros: next });
+                                    updateEditingDraft(dish.id, { pros: next });
                                   }}
                                   className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 border border-gray-200 rounded-lg"
                                 />
@@ -2176,7 +2177,7 @@ export default function RestaurantDetails() {
                                   onClick={() => {
                                     const next = [...(editingDishDraft.pros || [])];
                                     next.splice(idx, 1);
-                                    updateEditingDraft({ pros: next });
+                                    updateEditingDraft(dish.id, { pros: next });
                                   }}
                                   className="px-2 text-red-500 hover:text-red-700 font-bold"
                                 >
@@ -2191,7 +2192,7 @@ export default function RestaurantDetails() {
                               <label className="block text-sm font-medium text-red-700">Cons</label>
                               <button
                                 type="button"
-                                onClick={() => updateEditingDraft({ cons: [...(editingDishDraft.cons || []), ''] })}
+                                onClick={() => updateEditingDraft(dish.id, { cons: [...(editingDishDraft.cons || []), ''] })}
                                 className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200 hover:bg-red-100"
                               >
                                 + Add Con
@@ -2205,7 +2206,7 @@ export default function RestaurantDetails() {
                                   onChange={(e) => {
                                     const next = [...(editingDishDraft.cons || [])];
                                     next[idx] = e.target.value;
-                                    updateEditingDraft({ cons: next });
+                                    updateEditingDraft(dish.id, { cons: next });
                                   }}
                                   className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 border border-gray-200 rounded-lg"
                                 />
@@ -2214,7 +2215,7 @@ export default function RestaurantDetails() {
                                   onClick={() => {
                                     const next = [...(editingDishDraft.cons || [])];
                                     next.splice(idx, 1);
-                                    updateEditingDraft({ cons: next });
+                                    updateEditingDraft(dish.id, { cons: next });
                                   }}
                                   className="px-2 text-red-500 hover:text-red-700 font-bold"
                                 >
@@ -2228,7 +2229,7 @@ export default function RestaurantDetails() {
                             <label className="block text-sm font-medium text-purple-700 mb-1">Rank (Crown)</label>
                             <select
                               value={editingDishDraft.rank || ""}
-                              onChange={(e) => updateEditingDraft({ rank: e.target.value ? Number(e.target.value) : null })}
+                              onChange={(e) => updateEditingDraft(dish.id, { rank: e.target.value ? Number(e.target.value) : null })}
                               className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm"
                             >
                               <option value="">No Rank</option>
@@ -2244,7 +2245,7 @@ export default function RestaurantDetails() {
                             type="checkbox"
                             checked={editingDishDraft.isRecommended}
                             onChange={(event) =>
-                              updateEditingDraft({
+                              updateEditingDraft(dish.id, {
                                 isRecommended: event.target.checked,
                               })
                             }
@@ -2256,7 +2257,7 @@ export default function RestaurantDetails() {
                           <button
                             type="button"
                             disabled={isApiBusy}
-                            onClick={closeEditDish}
+                            onClick={() => closeEditDish(dish.id)}
                             className="px-3 py-2 rounded-xl bg-gray-100 text-gray-700 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             Cancel
@@ -2264,7 +2265,7 @@ export default function RestaurantDetails() {
                           <button
                             type="button"
                             disabled={isApiBusy}
-                            onClick={saveEditedDish}
+                            onClick={() => saveEditedDish(dish.id)}
                             className="px-3 py-2 rounded-xl bg-black text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
                           >
                             {isSavingDish ? (
