@@ -372,33 +372,35 @@ export default function RestaurantDetails() {
   const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
   const [isGeneratingEmbeddings, setIsGeneratingEmbeddings] = useState(false);
 
-  const () => handleGenerateInsightsForEditingDish(dish.id) = async () => {
-    if (!editingDishDraft) return;
-    setIsGeneratingInsights(true);
-    try {
-      const dishData = {
-        name: editingDishDraft.name,
-        rating: editingDishDraft.rating,
-        cuisine: editingDishDraft.cuisine || restaurant?.cuisine,
-        review: editingDishDraft.review
-      };
-      const res = await api.analyzeDishes([dishData]);
-      if (res.dishes && res.dishes.length > 0) {
-        const generated = res.dishes[0];
-        setEditingDishDraft(prev => prev ? {
+  const handleGenerateInsightsForEditingDish = async () => {
+  if (!editingDishDraft) return;
+  setIsGeneratingInsights(true);
+  try {
+    const dishData = {
+      name: editingDishDraft.name,
+      rating: editingDishDraft.rating,
+      cuisine: editingDishDraft.cuisine || restaurant?.cuisine,
+      review: editingDishDraft.review,
+    };
+    const res = await api.analyzeDishes([dishData]);
+    if (res.dishes && res.dishes.length > 0) {
+      const generated = res.dishes[0];
+      setEditingDishDraft(prev =>
+        prev ? {
           ...prev,
           pros: generated.pros || [],
           cons: generated.cons || [],
-          summary: generated.summary || '',
-          verdict: generated.verdict || ''
-        } : null);
-      }
-    } catch (err) {
-      console.error("Failed to generate insights:", err);
-      alert("Failed to generate insights");
-    } finally {
-      setIsGeneratingInsights(false);
+          summary: generated.summary || "",
+          verdict: generated.verdict || "",
+        } : null
+      );
     }
+  } catch (err) {
+    console.error("Failed to generate insights:", err);
+    alert("Failed to generate insights");
+  } finally {
+    setIsGeneratingInsights(false);
+  }
   };
 
   const [showInstagramPreview, setShowInstagramPreview] = useState(false);
@@ -916,7 +918,8 @@ export default function RestaurantDetails() {
     setEditingDishDraft(null);
   };
 
-  const updateEditingDraft = (partial: Partial<DishEditDraft>) => {
+  const updateEditingDraft = (...args: [Partial<DishEditDraft>] | [string, Partial<DishEditDraft>]) => {
+    const partial = args.length === 2 ? args[1] : args[0];
     setEditingDishDraft((prev) => {
       if (!prev) return prev;
       return { ...prev, ...partial };
@@ -927,7 +930,7 @@ export default function RestaurantDetails() {
     if (!editingDishDraft || !files || files.length === 0 || isApiBusy) return;
     const incoming = await filesToPhotos(files);
     const combined = [...editingDishDraft.photos, ...incoming];
-    updateEditingDraft(dish.id, {
+    updateEditingDraft(editingDishId!, {
       photos: combined,
       primaryPhotoId: resolvePrimaryPhotoId(
         combined,
@@ -1126,7 +1129,7 @@ export default function RestaurantDetails() {
 
       const nextReviews = [firstReview, ...existingReviews.slice(1)];
 
-      await updateDish(dishId, {
+      await updateDish(editingDishId, {
         name: editingDishDraft.name.trim(),
         rating: Math.max(1, Math.min(5, editingDishDraft.rating)),
         priceLevel: editingDishDraft.priceLevel,
@@ -1681,8 +1684,7 @@ export default function RestaurantDetails() {
                 dishPhotos,
                 dish.primaryPhotoId,
               );
-              const isEditing = !!editingDishDrafts[dish.id];
-              const editingDishDraft = editingDishDrafts[dish.id];
+              const isEditing = editingDishId === dish.id && !!editingDishDraft;
               
               const isFirstRecommended = index === 0 && dish.isRecommended;
               const isFirstOther = index === recommendedDishes.length;
@@ -1709,7 +1711,7 @@ export default function RestaurantDetails() {
                         <button
                           type="button"
                           disabled={isApiBusy}
-                          onClick={() => openEditDish()}
+                          onClick={() => openEditDish(dish)}
                           className="p-2 rounded-full border border-gray-200 bg-white text-gray-500 disabled:opacity-60 disabled:cursor-not-allowed"
                           aria-label="Edit dish"
                         >
@@ -2118,7 +2120,7 @@ export default function RestaurantDetails() {
                             accept="image/*,video/*"
                             multiple
                             onChange={(event) =>
-                              addPhotosToEditingDish(dish.id, event.target.files)
+                              addPhotosToEditingDish(event.target.files)
                             }
                             className="hidden"
                           />
@@ -2141,7 +2143,7 @@ export default function RestaurantDetails() {
                             <button
                               type="button"
                               disabled={isGeneratingInsights}
-                              onClick={() => handleGenerateInsightsForEditingDish(dish.id)}
+                              onClick={() => handleGenerateInsightsForEditingDish()}
                               className="text-xs inline-flex items-center gap-1 font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded border border-indigo-200 hover:bg-indigo-100 disabled:opacity-50"
                               title="Generate Pros & Cons with Gemini"
                             >
@@ -2257,7 +2259,7 @@ export default function RestaurantDetails() {
                           <button
                             type="button"
                             disabled={isApiBusy}
-                            onClick={() => closeEditDish(dish.id)}
+                            onClick={() => closeEditDish()}
                             className="px-3 py-2 rounded-xl bg-gray-100 text-gray-700 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             Cancel
@@ -2265,7 +2267,7 @@ export default function RestaurantDetails() {
                           <button
                             type="button"
                             disabled={isApiBusy}
-                            onClick={() => saveEditedDish(dish.id)}
+                            onClick={() => saveEditedDish()}
                             className="px-3 py-2 rounded-xl bg-black text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
                           >
                             {isSavingDish ? (
@@ -3123,3 +3125,4 @@ export default function RestaurantDetails() {
     </div>
   );
 }
+

@@ -2384,10 +2384,11 @@ export default function MapPage() {
                       <button
                         type="button"
                         onClick={() => batchPhotoInputRef.current?.click()}
-                        disabled={isApiBusy}
+                        disabled={isApiBusy || isImportingBatch}
                         className="w-full bg-white text-indigo-600 border border-indigo-200 font-medium py-2.5 rounded-xl hover:bg-indigo-50 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 mb-3 shadow-sm"
                       >
-                        <ImagePlus size={18} /> Select Multiple Photos
+                        <ImagePlus size={18} />
+                        {isImportingBatch ? 'Importing photos...' : 'Select Multiple Photos'}
                       </button>
 
                       {pendingGallery.length > 0 && (

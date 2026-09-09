@@ -81,7 +81,19 @@ async function getJSON<T>(path: string): Promise<T> {
   if (!resp.ok) {
     await handleApiError(resp, `API GET ${path} failed`);
   }
-  return (await resp.json()) as T;
+  // Try to parse JSON; if parsing fails, return raw text.
+  const contentType = resp.headers.get('content-type') || '';
+  const text = await resp.text();
+  if (contentType.includes('application/json')) {
+    try {
+      return JSON.parse(text) as T;
+    } catch (e) {
+      throw new Error(`Failed to parse JSON from ${path}: ${e}`);
+    }
+  } else {
+    // Return raw text for non‑JSON responses (e.g., error messages)
+    return text as unknown as T;
+  }
 }
 
 /** POST/PUT helper for JSON bodies */
