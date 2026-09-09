@@ -33,11 +33,13 @@ const toValidLatLng = (value: { lat: unknown; lng: unknown } | L.LatLng | null |
 };
 
 function MapClickHandler({ onPick }: { onPick: (latlng: L.LatLng) => void }) {
-  useMapEvents({ click: (event) => {
-    if (event?.latlng) {
-      onPick(event.latlng);
+  useMapEvents({
+    click: (event) => {
+      if (event?.latlng) {
+        onPick(event.latlng);
+      }
     }
-  }});
+  });
   return null;
 }
 
@@ -48,7 +50,7 @@ function MapUpdater({ center }: { center: L.LatLng }) {
 
   useEffect(() => {
     if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    
+
     const fly = () => {
       const size = map.getSize();
       if (size.x > 0 && size.y > 0) {
@@ -555,7 +557,7 @@ export default function RestaurantFormPage() {
                     zoom={15}
                     className="h-full w-full"
                   >
-                    <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+                    <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=cb1_33yg_1_4f97ccb4ab511fad6b410a29" />
                     <NearbyPOIs />
                     <MapClickHandler onPick={(picked) => setLatLngSafely(picked, undefined, true)} />
                     <MapUpdater center={initialMapCenter} />

@@ -2009,7 +2009,7 @@ export default function MapPage() {
 
       <MapContainer center={[18.9442, 72.8276]} zoom={15} className="h-full w-full" attributionControl={false}>
         <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=cb1_33yg_1_4f97ccb4ab511fad6b410a29"
         />
 
         <LocationMarker onLocation={(position) => {
@@ -2505,7 +2505,7 @@ export default function MapPage() {
                           className="h-full w-full"
                           attributionControl={false}
                         >
-                          <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+                          <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=cb1_33yg_1_4f97ccb4ab511fad6b410a29" />
                           <NearbyPOIs />
                           <MapClickHandler onClick={(event) => setLatLngSafely(event.latlng, undefined, true)} />
                           <MapViewportUpdater center={validPinLatLng ? safeLatLng(validPinLatLng) : (validCurrentPosition ? safeLatLng(validCurrentPosition) : null)} />
