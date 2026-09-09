@@ -26,3 +26,7 @@ dist-ssr
 # Environment variables
 .env
 .env.*
+
+# Cloudflare / local worker config
+wrangler.toml
+backend/wrangler.toml
