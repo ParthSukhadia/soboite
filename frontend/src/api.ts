@@ -108,7 +108,13 @@ async function sendJSON<T>(method: string, path: string, body: any): Promise<T> 
   if (!resp.ok) {
     await handleApiError(resp, `API ${method} ${path} failed`);
   }
-  return (await resp.json()) as T;
+  const contentType = resp.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return (await resp.json()) as T;
+  } else {
+    // Return raw text for non‑JSON responses (e.g., plain error messages)
+    return (await resp.text()) as unknown as T;
+  }
 }
 
 /** Public API used by the frontend store */

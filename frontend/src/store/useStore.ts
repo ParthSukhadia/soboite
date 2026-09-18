@@ -130,7 +130,10 @@ const cacheImageUrlsForState = async (restaurants: Restaurant[], dishes: Dish[])
 };
 
 const uploadImage = async (dataUrl: string): Promise<string> => {
-  if (!dataUrl.startsWith('data:')) return dataUrl;
+  // Accept only image data URLs; reject other types such as videos
+  if (!dataUrl.startsWith('data:image/')) {
+    throw new Error('Only image files are supported for upload.');
+  }
   return await api.uploadImage(dataUrl);
 };
 
