@@ -34,7 +34,8 @@ const querySupabaseOrProxy = async (c: any, queryFn: (supabase: any) => Promise<
       result.error.message?.includes('JWT') ||
       result.error.message?.includes('unauthorized') ||
       result.error.message?.includes('401') ||
-      result.error.code === 'PGRST301'
+      result.error.code === 'PGRST301' ||
+      result.error.code === 'PGRST1016'
     )) {
       console.warn(`[SUPABASE PROXY] Local API key invalid. Proxying ${c.req.method} ${c.req.path} to production worker...`);
       const prodUrl = `https://soboite-backend.masanirishabh12.workers.dev${c.req.path}`;
