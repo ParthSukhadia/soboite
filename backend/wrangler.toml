@@ -3,14 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2024-01-01"
 keep_vars = true
 [vars]
-SUPABASE_URL="https://dfdohjlpfrnstqjyakfp.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY="sb_secret_placeholder"
-SUPABASE_PUBLISHABLE_KEY="sb_publishable_placeholder"
-SUPABASE_SECRET_KEY="sb_secret_placeholder"
-SUPABASE_JWKS_URL="https://dfdohjlpfrnstqjyakfp.supabase.co/auth/v1/.well-known/jwks.json"
-ZERNIO_API_KEY="sk_placeholder"
 ZERNIO_ACCOUNT_ID="6a4893e69d9472faae70004a"
-GEMINI_API_KEY="placeholder"
+SUPABASE_URL="https://dfdohjlpfrnstqjyakfp.supabase.co"
+SUPABASE_JWKS_URL="https://dfdohjlpfrnstqjyakfp.supabase.co/auth/v1/.well-known/jwks.json"
 [dev]
 host = "0.0.0.0"
 port = 8787
