@@ -161,7 +161,7 @@ export default function CategoryInstagramPreviewModal({ isOpen, onClose, categor
               <input type="text" value={subText} onChange={(e) => setSubText(e.target.value)} placeholder="Subtitle (e.g. in South Mumbai)" className="text-xs border-gray-300 rounded p-1.5 focus:ring-indigo-500 w-full" />
             </div>
 
-            <div className="w-full max-w-sm bg-white rounded-lg shadow-md flex justify-center items-center relative overflow-hidden" style={{ aspectRatio: '4/5', maxHeight: '550px' }}>
+            <div className="w-full max-w-sm bg-white rounded-lg shadow-md flex justify-center items-center relative overflow-hidden" style={{ aspectRatio: '1/1', maxHeight: '550px' }}>
               {isGenerating ? (
                 <div className="flex flex-col items-center gap-2 text-gray-400 absolute inset-0 bg-white bg-opacity-80 z-10 justify-center">
                   <Loader2 className="w-8 h-8 animate-spin" />

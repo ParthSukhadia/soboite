@@ -2680,8 +2680,7 @@ export default function MapPage() {
                                   <div key={dish.id} className="border border-gray-200 rounded-xl p-3 space-y-3">
                                     {dish.imageStorageUrl && (
                                       <div
-                                        className={`w-full rounded-lg overflow-hidden relative [touch-action:none] ${draggingDishPhotoId === dish.id ? 'cursor-grabbing' : 'cursor-grab'}`}
-                                        style={{ height: '12rem' }}
+                                        className={`w-full aspect-square rounded-lg overflow-hidden relative [touch-action:none] ${draggingDishPhotoId === dish.id ? 'cursor-grabbing' : 'cursor-grab'}`}
                                         onPointerDown={(event) => handleDishPhotoPointerDown(dish.id, event)}
                                         onPointerMove={handleDishPhotoPointerMove}
                                         onPointerUp={handleDishPhotoPointerUp}

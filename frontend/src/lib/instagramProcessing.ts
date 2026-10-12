@@ -119,7 +119,7 @@ export const processInstagramImage = async (
   const img = await loadImage(imgUrl);
   const canvas = document.createElement('canvas');
   const CANVAS_WIDTH = 1080;
-  const CANVAS_HEIGHT = 1350; // 4:5 ratio
+  const CANVAS_HEIGHT = 1080;
   canvas.width = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
   
@@ -455,7 +455,7 @@ export const processInstagramCategory = async (
 ): Promise<string> => {
   const canvas = document.createElement('canvas');
   const CANVAS_WIDTH = 1080;
-  const CANVAS_HEIGHT = 1350;
+  const CANVAS_HEIGHT = 1080;
   canvas.width = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
   

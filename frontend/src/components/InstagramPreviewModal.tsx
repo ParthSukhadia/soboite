@@ -452,7 +452,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
           {step === 'generating' && (
             <div className="flex flex-col items-center justify-center h-full p-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
-              <p className="text-gray-600">Drawing Instagram overlays (4:5 ratio)...</p>
+              <p className="text-gray-600">Drawing Instagram overlays (1:1 ratio)...</p>
             </div>
           )}
 
@@ -635,9 +635,9 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                           />
                         </div>
                         {p.mediaType === 'video' ? (
-                          <video src={p.url} controls autoPlay muted loop playsInline preload="metadata" className="w-full object-contain rounded bg-black" style={{ aspectRatio: '4/5' }} />
+                          <video src={p.url} controls autoPlay muted loop playsInline preload="metadata" className="w-full object-contain rounded bg-black" style={{ aspectRatio: '1/1' }} />
                         ) : (
-                          <img src={p.url} alt={`Preview ${index}`} className="w-full object-contain rounded" style={{ aspectRatio: '4/5' }} />
+                          <img src={p.url} alt={`Preview ${index}`} className="w-full object-contain rounded" style={{ aspectRatio: '1/1' }} />
                         )}
                       </div>
                     ))}
