@@ -209,13 +209,12 @@ app.post('/api/text-import', async (c) => {
 
     const prompt = `
       You are an assistant helping extract structured data from a user's text note about a restaurant visit.
-      Read the text carefully. 
-      1. Identify the restaurant name.
-      2. Use Google Search to find the EXACT address, latitude, and longitude for this restaurant. (assume the city is what the user mentions or context). If you find multiple, pick the most likely one based on context.
-      3. Identify the overall price level (1=cheap, 2=moderate, 3=expensive) and rating (1-5 stars) for the restaurant if mentioned.
-      4. Extract any specific dishes mentioned, along with their ratings and reviews.
-      
-      Return ONLY valid JSON.
+      Extract only facts that are explicitly stated or can be identified with high confidence. Every property is optional: omit missing or uncertain values rather than inventing them or using defaults.
+      Include the restaurant name, address, area, restaurant type, cuisine, cost for two, and review when present. Include latitude and longitude only when both are known with high confidence; do not make an address or coordinates mandatory.
+      Extract only dishes that are mentioned, including each available name, rating, price, cuisine, and review. Omit unavailable dish properties.
+      Use Google Search only when the text identifies a specific restaurant well enough to verify its address or coordinates. If the search cannot verify them, continue with the other extracted information.
+
+      Return ONLY valid JSON containing the available properties.
       
       User's Text:
       ${text}
@@ -234,12 +233,19 @@ app.post('/api/text-import', async (c) => {
           properties: {
             name: { type: Type.STRING },
             address: { type: Type.STRING },
+            locationName: { type: Type.STRING },
             lat: { type: Type.NUMBER },
             lng: { type: Type.NUMBER },
+            type: { type: Type.STRING },
+            costForTwo: { type: Type.NUMBER },
             priceLevel: { type: Type.NUMBER },
             review: { type: Type.STRING },
+            description: { type: Type.STRING },
+            notes: { type: Type.STRING },
             rating: { type: Type.NUMBER },
             cuisine: { type: Type.STRING },
+            pros: { type: Type.ARRAY, items: { type: Type.STRING } },
+            cons: { type: Type.ARRAY, items: { type: Type.STRING } },
             serves: { type: Type.STRING },
             dishes: {
               type: Type.ARRAY,
@@ -249,7 +255,14 @@ app.post('/api/text-import', async (c) => {
                   name: { type: Type.STRING },
                   rating: { type: Type.NUMBER },
                   review: { type: Type.STRING },
-                  priceLevel: { type: Type.NUMBER }
+                  description: { type: Type.STRING },
+                  priceLevel: { type: Type.NUMBER },
+                  price: { type: Type.NUMBER },
+                  actualPrice: { type: Type.NUMBER },
+                  cuisine: { type: Type.STRING },
+                  tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  pros: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  cons: { type: Type.ARRAY, items: { type: Type.STRING } }
                 }
               }
             }

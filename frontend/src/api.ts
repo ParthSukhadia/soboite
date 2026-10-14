@@ -119,6 +119,9 @@ async function sendJSON<T>(method: string, path: string, body: any): Promise<T> 
 
 /** Public API used by the frontend store */
 export const api = {
+  textImport: (text: string) =>
+    sendJSON<Record<string, any>>("POST", "/api/text-import", { text }),
+
   // Fetch all restaurants (the backend returns an array of restaurant rows)
   getRestaurants: () => getJSON<any[]>("/api/restaurants"),
 

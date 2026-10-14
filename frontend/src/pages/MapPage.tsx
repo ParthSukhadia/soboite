@@ -11,6 +11,8 @@ import TagSelector from '../components/TagSelector';
 import PriceLevelIcon from '../components/PriceLevelIcon';
 import CachedImage from '../components/CachedImage';
 import NearbyPOIs from '../components/NearbyPOIs';
+import { ConfirmModal } from '../components/ConfirmModal';
+import { api } from '../api';
 
 type PinLatLng = { lat: number; lng: number };
 
@@ -307,6 +309,12 @@ export default function MapPage() {
   const [isSavingRestaurant, setIsSavingRestaurant] = useState(false);
   const [isBootstrappingData, setIsBootstrappingData] = useState(true);
   const [addFormError, setAddFormError] = useState<string | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; action: (() => void) | null }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    action: null
+  });
   const locationMapRef = useRef<HTMLDivElement | null>(null);
   // Controlled inputs for step 3 (persisted to sessionStorage so switching apps doesn't lose data)
   const [newRestName, setNewRestName] = useState(() => sessionStorage.getItem('draft_restName') ?? '');
@@ -628,78 +636,116 @@ export default function MapPage() {
 
     try {
       if (!dataToMap) {
-        const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
-        const response = await fetch(`${baseUrl}/api/text-import`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: textImportContent }),
-        });
-
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.error || 'Text processing failed');
-        }
-
-        dataToMap = await response.json();
+        dataToMap = await api.textImport(textImportContent);
       }
 
       const resto = dataToMap.restaurant || dataToMap;
-      const parsedDishes = dataToMap.dishes || [];
+      const parsedDishes = Array.isArray(dataToMap.dishes) ? dataToMap.dishes : [];
+      const getText = (...values: unknown[]) => values.find(
+        (value): value is string => typeof value === 'string' && value.trim().length > 0,
+      )?.trim();
+      const getNumber = (...values: unknown[]) => {
+        for (const value of values) {
+          if (typeof value === 'number' && Number.isFinite(value)) return value;
+          if (typeof value === 'string' && value.trim()) {
+            const parsedValue = Number(value);
+            if (Number.isFinite(parsedValue)) return parsedValue;
+          }
+        }
+        return undefined;
+      };
+      const getTextList = (value: unknown) => Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())
+        : [];
 
-      if (resto.name) {
-        setNewRestName(resto.name);
-        sessionStorage.setItem('draft_restName', resto.name);
+      const importedName = getText(resto.name, resto.restaurantName);
+      if (importedName) {
+        setNewRestName(importedName);
+        sessionStorage.setItem('draft_restName', importedName);
       }
-      if (resto.address) {
-        setNewRestAddress(resto.address);
-        sessionStorage.setItem('draft_restAddress', resto.address);
-      }
-      if (resto.lat || resto.latitude) {
-        setLatLng({ lat: resto.lat || resto.latitude, lng: resto.lng || resto.longitude });
-      }
-
-      if (resto.area || resto.locationName) {
-        setNewRestLocationName(resto.area || resto.locationName);
+      const importedAddress = getText(resto.address);
+      if (importedAddress) {
+        setNewRestAddress(importedAddress);
+        sessionStorage.setItem('draft_restAddress', importedAddress);
       }
 
-      if (resto.costForTwo) {
-        setDraftCostForTwo(String(resto.costForTwo));
+      const latitude = getNumber(resto.lat, resto.latitude);
+      const longitude = getNumber(resto.lng, resto.longitude);
+      if (latitude !== undefined && longitude !== undefined && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180) {
+        setLatLng({ lat: latitude, lng: longitude });
       }
 
-      let combinedNotes = '';
-      if (resto.description) combinedNotes += resto.description + '\n';
-      if (resto.pros && resto.pros.length) combinedNotes += 'Pros: ' + resto.pros.join(', ') + '\n';
-      if (resto.cons && resto.cons.length) combinedNotes += 'Cons: ' + resto.cons.join(', ');
-      if (combinedNotes) {
-        setNewRestNotes(combinedNotes.trim());
+      const importedLocation = getText(resto.area, resto.locationName, resto.location_name);
+      if (importedLocation) {
+        setNewRestLocationName(importedLocation);
+        sessionStorage.setItem('draft_restLocationName', importedLocation);
       }
 
-      if (parsedDishes && parsedDishes.length > 0) {
-        setDishPhotos(parsedDishes.map((d: any) => {
-          let dishReview = d.review || d.description || '';
-          if (d.pros && d.pros.length) dishReview += '\nPros: ' + d.pros.join(', ');
-          if (d.cons && d.cons.length) dishReview += '\nCons: ' + d.cons.join(', ');
+      const importedCost = getNumber(resto.costForTwo, resto.cost_for_two);
+      if (importedCost !== undefined && importedCost >= 0) {
+        setDraftCostForTwo(String(importedCost));
+      }
 
-          let cuisineTag = '';
-          if (Array.isArray(d.tags)) cuisineTag = d.tags[0] || '';
-          if (Array.isArray(d.cuisine)) cuisineTag = d.cuisine[0] || '';
+      const importedType = getText(resto.type, resto.restaurantType, resto.restaurant_type);
+      if (importedType) {
+        if (typeOptions.includes(importedType)) {
+          setRestaurantTypeSelection(importedType);
+        } else {
+          setRestaurantTypeSelection('__custom__');
+          setCustomRestaurantType(importedType);
+        }
+      }
+
+      const importedCuisine = getText(resto.cuisine);
+      if (importedCuisine) {
+        if (cuisineOptions.includes(importedCuisine)) {
+          setRestaurantCuisineSelection(importedCuisine);
+        } else {
+          setRestaurantCuisineSelection('__custom__');
+          setCustomRestaurantCuisine(importedCuisine);
+        }
+      }
+
+      const importedNotes = [
+        getText(resto.description, resto.review, resto.notes),
+        getTextList(resto.pros).length ? `Pros: ${getTextList(resto.pros).join(', ')}` : '',
+        getTextList(resto.cons).length ? `Cons: ${getTextList(resto.cons).join(', ')}` : '',
+      ].filter(Boolean).join('\n');
+      if (importedNotes) {
+        setNewRestNotes(importedNotes);
+        sessionStorage.setItem('draft_restNotes', importedNotes);
+      }
+
+      const importedDishes = parsedDishes.filter((dish: unknown) => dish && typeof dish === 'object').map((dish: any) => {
+          const dishReview = [
+            getText(dish.review, dish.description),
+            getTextList(dish.pros).length ? `Pros: ${getTextList(dish.pros).join(', ')}` : '',
+            getTextList(dish.cons).length ? `Cons: ${getTextList(dish.cons).join(', ')}` : '',
+          ].filter(Boolean).join('\n');
+          const dishTags = getTextList(dish.tags);
+          const cuisineValues = getTextList(dish.cuisine);
+          const cuisineTag = typeof dish.cuisine === 'string' ? dish.cuisine.trim() : (cuisineValues[0] || dishTags[0] || '');
 
           return {
             id: createId(),
             imageStorageUrl: '',
             photoPosition: { x: 50, y: 50 },
             photoZoom: 1,
-            name: d.name || '',
-            rating: d.rating || 5,
-            priceLevel: d.priceLevel || 2,
-            actualPrice: d.price ? String(d.price) : (d.actualPrice || ''),
-            review: dishReview.trim(),
+            name: getText(dish.name) || '',
+            rating: getNumber(dish.rating) ?? 5,
+            priceLevel: getNumber(dish.priceLevel, dish.price_level) ?? 2,
+            actualPrice: getNumber(dish.price, dish.actualPrice, dish.actual_price) !== undefined
+              ? String(getNumber(dish.price, dish.actualPrice, dish.actual_price))
+              : '',
+            review: dishReview,
             reviewDate: new Date().toISOString().slice(0, 10),
             cuisine: cuisineTag,
-            flavorTags: Array.isArray(d.tags) ? d.tags : [],
+            flavorTags: dishTags,
             isCustomCuisine: false
           };
-        }));
+        });
+      if (importedDishes.length > 0) {
+        setDishPhotos((prev) => [...prev, ...importedDishes]);
         setShowDishBuilder(true);
       }
 
@@ -1160,8 +1206,14 @@ export default function MapPage() {
     setPendingGallery((prev) => prev.filter((p) => p !== url));
   };
 
+  const requestDeleteConfirmation = (title: string, message: string, action: () => void) => {
+    setConfirmModal({ isOpen: true, title, message, action });
+  };
+
   const handleRemoveFromGallery = (url: string) => {
-    setPendingGallery((prev) => prev.filter((p) => p !== url));
+    requestDeleteConfirmation('Remove Image', 'Remove this image from the photo pool?', () => {
+      setPendingGallery((prev) => prev.filter((p) => p !== url));
+    });
   };
 
   const addEmptyDishCard = () => {
@@ -1191,7 +1243,34 @@ export default function MapPage() {
   };
 
   const removeDishCard = (id: string) => {
-    setDishPhotos((prev) => prev.filter((dish) => dish.id !== id));
+    const dish = dishPhotos.find((item) => item.id === id);
+    requestDeleteConfirmation(
+      'Remove Dish',
+      `Remove ${dish?.name ? `"${dish.name}"` : 'this dish card'} from the draft?`,
+      () => setDishPhotos((prev) => prev.filter((item) => item.id !== id)),
+    );
+  };
+
+  const removeRestaurantPhoto = () => {
+    requestDeleteConfirmation('Remove Image', 'Remove the restaurant image from the draft?', () => {
+      setRestaurantPhoto('');
+      setRestaurantPhotoPosition({ x: 50, y: 50 });
+      setRestaurantPhotoZoom(1);
+      restaurantPhotoNextPositionRef.current = { x: 50, y: 50 };
+      if (restaurantPhotoInputRef.current) {
+        restaurantPhotoInputRef.current.value = '';
+      }
+    });
+  };
+
+  const removeDishPhoto = (dishId: string) => {
+    requestDeleteConfirmation('Remove Image', 'Remove this image from the dish card?', () => {
+      updateDishCard(dishId, {
+        imageStorageUrl: '',
+        photoPosition: { x: 50, y: 50 },
+        photoZoom: 1
+      });
+    });
   };
 
   const handleDishPhotoPointerDown = (id: string, event: React.PointerEvent<HTMLDivElement>) => {
@@ -2345,13 +2424,7 @@ export default function MapPage() {
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            setRestaurantPhoto('');
-                            setRestaurantPhotoPosition({ x: 50, y: 50 });
-                            setRestaurantPhotoZoom(1);
-                            restaurantPhotoNextPositionRef.current = { x: 50, y: 50 };
-                            if (restaurantPhotoInputRef.current) {
-                              restaurantPhotoInputRef.current.value = '';
-                            }
+                            removeRestaurantPhoto();
                           }}
                           className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1"
                           aria-label="Remove restaurant photo"
@@ -2415,7 +2488,7 @@ export default function MapPage() {
                               </select>
                               <button
                                 type="button"
-                                onClick={() => handleRemoveFromGallery(url)}
+                                  onClick={() => handleRemoveFromGallery(url)}
                                 className="mt-2 text-xs text-red-500 font-medium hover:text-red-600"
                               >
                                 Remove
@@ -2700,11 +2773,7 @@ export default function MapPage() {
                                           type="button"
                                           onClick={(event) => {
                                             event.stopPropagation();
-                                            updateDishCard(dish.id, {
-                                              imageStorageUrl: '',
-                                              photoPosition: { x: 50, y: 50 },
-                                              photoZoom: 1
-                                            });
+                                            removeDishPhoto(dish.id);
                                           }}
                                           className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1"
                                           aria-label="Remove dish photo"
@@ -2878,6 +2947,16 @@ export default function MapPage() {
         )}
 
       </AnimatePresence>
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        isDestructive
+        confirmText="Remove"
+        onConfirm={() => confirmModal.action?.()}
+        onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+      />
 
       {isApiBusy && (
         <div className="fixed inset-0 z-[1200] bg-black/10 pointer-events-auto">

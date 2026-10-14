@@ -2,7 +2,7 @@ export const optimizeImage = (file: File, maxWidth = 1024, maxHeight = 1024, qua
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      if (file.type.startsWith('video/')) {
+      if (file.type.startsWith('video/') || /\.(mp4|webm|mov|ogg|m4v|mkv|3gp)$/i.test(file.name)) {
         return resolve(e.target?.result as string);
       }
       const img = new Image();

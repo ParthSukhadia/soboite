@@ -59,6 +59,12 @@ const removeMissingColumnsFromPayload = (payload: Record<string, unknown>, error
 
 const normalizePhotos = (source: unknown, fallbackUrl?: string): PhotoEntry[] => {
   const items: PhotoEntry[] = [];
+  const getMediaType = (url: string, type?: unknown): PhotoEntry['type'] => {
+    if (type === 'image' || type === 'video') return type;
+    return url.startsWith('data:video/') || /\.(mp4|webm|mov|ogg|m4v|mkv|3gp|quicktime)(?:$|[?#])/i.test(url)
+      ? 'video'
+      : 'image';
+  };
 
   if (Array.isArray(source)) {
     source.forEach((entry) => {
@@ -70,7 +76,8 @@ const normalizePhotos = (source: unknown, fallbackUrl?: string): PhotoEntry[] =>
       items.push({
         id: String((entry as any).id ?? createReviewId()),
         url: candidateUrl,
-        uploadedAt: normalizeUploadedAt(rawUploadedAt, createdAt)
+        uploadedAt: normalizeUploadedAt(rawUploadedAt, createdAt),
+        type: getMediaType(candidateUrl, (entry as any).type)
       });
     });
   }
@@ -80,7 +87,8 @@ const normalizePhotos = (source: unknown, fallbackUrl?: string): PhotoEntry[] =>
     items.push({
       id: createReviewId(),
       url: fallback,
-      uploadedAt: normalizeUploadedAt(undefined, Date.now())
+      uploadedAt: normalizeUploadedAt(undefined, Date.now()),
+      type: getMediaType(fallback)
     });
   }
 
@@ -571,6 +579,10 @@ export const useStore = create<AppState>()(
               newState.topPickRestaurants = topPicksRes.restaurants;
             }
 
+            if (fetchId !== activeFetchId) {
+              return;
+            }
+
             set(newState);
 
             void cacheImageUrlsForState(mappedRests, mappedDishes);
@@ -631,15 +643,18 @@ export const useStore = create<AppState>()(
       },
 
       addRestaurant: async (restaurant) => {
+        activeFetchId++;
         set({ networkBusy: true });
         try {
           await api.addRestaurant(restaurant);
+          activeFetchId++;
           set((state) => ({ restaurants: [...state.restaurants, restaurant] }));
         } finally {
           set({ networkBusy: false });
         }
       },
       updateRestaurant: async (id, updates) => {
+        activeFetchId++;
         set({ networkBusy: true });
         try {
           const current = get().restaurants.find((restaurant) => restaurant.id === id);
@@ -725,6 +740,7 @@ export const useStore = create<AppState>()(
               }
             }
           }
+          activeFetchId++;
           set((state) => ({
             restaurants: state.restaurants.map((r) => r.id === id ? { ...r, ...normalizedUpdates } : r)
           }));
@@ -792,6 +808,7 @@ export const useStore = create<AppState>()(
           return;
         }
 
+        activeFetchId++;
         const urlMap = new Map<string, string>();
         const getUploadedUrl = async (url?: string): Promise<string | undefined> => {
           if (!url || !url.startsWith('data:')) return url;
@@ -865,6 +882,7 @@ export const useStore = create<AppState>()(
             }
           }
         }
+        activeFetchId++;
         set((state) => ({
           dishes: [
             ...state.dishes,
@@ -883,6 +901,7 @@ export const useStore = create<AppState>()(
         }));
       },
       updateDish: async (id, updates) => {
+        activeFetchId++;
         const current = get().dishes.find((dish) => dish.id === id);
         const normalizedUpdates: Partial<Dish> = { ...updates };
 
@@ -973,6 +992,7 @@ export const useStore = create<AppState>()(
             }
           }
         }
+        activeFetchId++;
         set((state) => ({
           dishes: state.dishes.map((d) => d.id === id ? { ...d, ...normalizedUpdates } : d)
         }));

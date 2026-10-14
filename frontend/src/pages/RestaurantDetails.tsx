@@ -110,6 +110,15 @@ const isVideoUrl = (url?: string, type?: string) => {
   return type === 'video' || url.startsWith('data:video/') || !!url.match(/\.(mp4|webm|mov|ogg)$/i);
 };
 
+const getFileMediaType = (file: File): PhotoEntry['type'] | undefined => {
+  if (file.type.startsWith('video/')) return 'video';
+  if (file.type.startsWith('image/')) return 'image';
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  if (['mp4', 'webm', 'mov', 'ogg', 'm4v', 'mkv', '3gp'].includes(extension ?? '')) return 'video';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'avif'].includes(extension ?? '')) return 'image';
+  return undefined;
+};
+
 const asPhotos = (
   photos?: PhotoEntry[],
   fallbackUrl?: string,
@@ -227,6 +236,9 @@ export default function RestaurantDetails() {
     isDestructive: false,
     action: null
   });
+  const requestDeleteConfirmation = (title: string, message: string, action: () => Promise<void> | void) => {
+    setConfirmModal({ isOpen: true, title, message, isDestructive: true, action });
+  };
 
   const openLikesList = async (targetId: string, type: 'restaurant' | 'dish') => {
     setLikesModal({ isOpen: true, type, id: targetId });
@@ -415,6 +427,8 @@ export default function RestaurantDetails() {
   const [isBootstrappingRestaurant, setIsBootstrappingRestaurant] =
     useState(true);
   const [loadingPhotos, setLoadingPhotos] = useState(true);
+  const [restaurantPhotoDraft, setRestaurantPhotoDraft] = useState<PhotoEntry[] | null>(null);
+  const [restaurantPhotoPrimaryDraft, setRestaurantPhotoPrimaryDraft] = useState<string | undefined>(undefined);
 
   const restaurantPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const dishPhotoInputRef = useRef<HTMLInputElement | null>(null);
@@ -551,9 +565,14 @@ export default function RestaurantDetails() {
   ): Promise<PhotoEntry[]> => {
     if (!files || files.length === 0) return [];
     const fileArray = Array.from(files);
+    const mediaFiles = fileArray.filter((file) => getFileMediaType(file));
     const now = new Date().toISOString();
-    
-    const results = await Promise.allSettled(fileArray.map((file) => optimizeImage(file)));
+
+    if (mediaFiles.length < fileArray.length) {
+      alert('Only image and video files can be uploaded. Other files were skipped.');
+    }
+
+    const results = await Promise.allSettled(mediaFiles.map((file) => optimizeImage(file)));
     
     const photos: PhotoEntry[] = [];
     results.forEach((result, index) => {
@@ -562,24 +581,25 @@ export default function RestaurantDetails() {
           id: createId(),
           url: result.value,
           uploadedAt: now,
-          type: fileArray[index].type.startsWith('video/') ? 'video' : 'image'
+          type: getFileMediaType(mediaFiles[index])
         });
       } else {
-        console.error("Failed to process file:", fileArray[index].name, result.reason);
+        console.error("Failed to process file:", mediaFiles[index].name, result.reason);
       }
     });
     
-    if (photos.length === 0 && fileArray.length > 0) {
+    if (photos.length === 0 && mediaFiles.length > 0) {
       alert("Failed to process the selected photos. Please try again with smaller images or different formats.");
     }
     
     return photos;
   };
 
-  const restaurantPhotos = asPhotos(restaurant.photos, restaurant.imageStorageUrl);
+  const savedRestaurantPhotos = asPhotos(restaurant.photos, restaurant.imageStorageUrl);
+  const restaurantPhotos = restaurantPhotoDraft ?? savedRestaurantPhotos;
   const restaurantPrimaryPhotoId = resolvePrimaryPhotoId(
     restaurantPhotos,
-    restaurant.primaryPhotoId,
+    restaurantPhotoDraft === null ? restaurant.primaryPhotoId : restaurantPhotoPrimaryDraft,
   );
 
   const persistRestaurantPhotos = async (
@@ -602,8 +622,9 @@ export default function RestaurantDetails() {
     setIsSavingRestaurantPhoto(true);
     try {
       const incoming = await filesToPhotos(files);
-      const combined = [...restaurantPhotos, ...incoming];
-      await persistRestaurantPhotos(combined, restaurantPrimaryPhotoId);
+      if (incoming.length > 0) {
+        setRestaurantPhotoDraft((current) => [...(current ?? savedRestaurantPhotos), ...incoming]);
+      }
     } finally {
       setIsSavingRestaurantPhoto(false);
       if (restaurantPhotoInputRef.current) {
@@ -612,29 +633,37 @@ export default function RestaurantDetails() {
     }
   };
 
-  const handleRestaurantPhotoRemove = async (photoId: string) => {
-    if (isApiBusy) return;
-    setIsSavingRestaurantPhoto(true);
-    try {
-      const remaining = restaurantPhotos.filter(
-        (photo) => photo.id !== photoId,
-      );
-      await persistRestaurantPhotos(
-        remaining,
-        restaurantPrimaryPhotoId === photoId
-          ? remaining[0]?.id
-          : restaurantPrimaryPhotoId,
-      );
-    } finally {
-      setIsSavingRestaurantPhoto(false);
+  const executeRestaurantPhotoRemove = (photoId: string) => {
+    const remaining = restaurantPhotos.filter((photo) => photo.id !== photoId);
+    setRestaurantPhotoDraft(remaining);
+    if (restaurantPrimaryPhotoId === photoId) {
+      setRestaurantPhotoPrimaryDraft(remaining[0]?.id);
     }
   };
 
-  const handleRestaurantPhotoPrimaryChange = async (photoId: string) => {
-    if (isApiBusy) return;
+  const handleRestaurantPhotoRemove = (photoId: string) => {
+    requestDeleteConfirmation(
+      'Delete Image',
+      'Remove this restaurant image from the pending changes?',
+      () => executeRestaurantPhotoRemove(photoId),
+    );
+  };
+
+  const handleRestaurantPhotoPrimaryChange = (photoId: string) => {
+    setRestaurantPhotoDraft((current) => current ?? savedRestaurantPhotos);
+    setRestaurantPhotoPrimaryDraft(photoId);
+  };
+
+  const saveRestaurantPhotoChanges = async () => {
+    if (restaurantPhotoDraft === null || isApiBusy) return;
     setIsSavingRestaurantPhoto(true);
     try {
-      await persistRestaurantPhotos(restaurantPhotos, photoId);
+      await persistRestaurantPhotos(restaurantPhotoDraft, restaurantPrimaryPhotoId);
+      setRestaurantPhotoDraft(null);
+      setRestaurantPhotoPrimaryDraft(undefined);
+      addToast('Restaurant photos saved.', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Could not save restaurant photos.', 'error');
     } finally {
       setIsSavingRestaurantPhoto(false);
     }
@@ -858,7 +887,7 @@ export default function RestaurantDetails() {
     return true;
   };
 
-  const handleDeleteDish = async (dishId: string) => {
+  const executeDeleteDish = async (dishId: string) => {
     if (isApiBusy) return;
     setDeletingDishIds((prev) => [...prev, dishId]);
     try {
@@ -870,6 +899,16 @@ export default function RestaurantDetails() {
     } finally {
       setDeletingDishIds((prev) => prev.filter((id) => id !== dishId));
     }
+  };
+
+  const handleDeleteDish = (dishId: string) => {
+    if (isApiBusy) return;
+    const dish = restaurantDishes.find((entry) => entry.id === dishId);
+    requestDeleteConfirmation(
+      'Delete Dish',
+      `Delete ${dish?.name ? `"${dish.name}"` : 'this dish'}? This cannot be undone.`,
+      () => executeDeleteDish(dishId),
+    );
   };
 
   const handleInlineDishRatingUpdate = async (dish: Dish, nextRating: number) => {
@@ -924,6 +963,43 @@ export default function RestaurantDetails() {
       if (!prev) return prev;
       return { ...prev, ...partial };
     });
+  };
+
+  const handleRemoveEditingDishPhoto = (photoId: string) => {
+    requestDeleteConfirmation(
+      'Delete Image',
+      'Remove this image from the dish? Save the dish to apply the change.',
+      () => {
+        setEditingDishDraft((current) => {
+          if (!current) return current;
+          const next = current.photos.filter((photo) => photo.id !== photoId);
+          return {
+            ...current,
+            photos: next,
+            primaryPhotoId: resolvePrimaryPhotoId(
+              next,
+              current.primaryPhotoId === photoId ? undefined : current.primaryPhotoId,
+            ),
+          };
+        });
+      },
+    );
+  };
+
+  const handleRemoveNewDishPhoto = (photoId: string) => {
+    requestDeleteConfirmation(
+      'Delete Image',
+      'Remove this image from the dish upload?',
+      () => {
+        setNewDishPhotos((prev) => {
+          const next = prev.filter((photo) => photo.id !== photoId);
+          setNewDishPrimaryPhotoId((current) =>
+            resolvePrimaryPhotoId(next, current === photoId ? undefined : current),
+          );
+          return next;
+        });
+      },
+    );
   };
 
   const addPhotosToEditingDish = async (files: FileList | null) => {
@@ -1323,7 +1399,7 @@ export default function RestaurantDetails() {
             onRemovePhoto={editMode ? handleRestaurantPhotoRemove : undefined}
           />
           {editMode && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <input
                 ref={restaurantPhotoInputRef}
                 type="file"
@@ -1347,6 +1423,30 @@ export default function RestaurantDetails() {
                 )}
                 Add restaurant photos
               </button>
+              {restaurantPhotoDraft !== null && (
+                <>
+                  <button
+                    type="button"
+                    disabled={isSavingRestaurantPhoto}
+                    onClick={() => {
+                      setRestaurantPhotoDraft(null);
+                      setRestaurantPhotoPrimaryDraft(undefined);
+                    }}
+                    className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isApiBusy}
+                    onClick={() => void saveRestaurantPhotoChanges()}
+                    className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl bg-black text-white hover:bg-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {isSavingRestaurantPhoto ? <Loader2 size={14} className="animate-spin" /> : null}
+                    Save photos
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -2099,25 +2199,12 @@ export default function RestaurantDetails() {
                             onPrimaryChange={(photoId) =>
                               updateEditingDraft(dish.id, { primaryPhotoId: photoId })
                             }
-                            onRemovePhoto={(photoId) => {
-                              const next = editingDishDraft.photos.filter(
-                                (photo) => photo.id !== photoId,
-                              );
-                              updateEditingDraft(dish.id, {
-                                photos: next,
-                                primaryPhotoId: resolvePrimaryPhotoId(
-                                  next,
-                                  editingDishDraft.primaryPhotoId === photoId
-                                    ? undefined
-                                    : editingDishDraft.primaryPhotoId,
-                                ),
-                              });
-                            }}
+                            onRemovePhoto={handleRemoveEditingDishPhoto}
                           />
                           <input
                             ref={editDishPhotoInputRef}
                             type="file"
-                            accept="image/*,video/*"
+                            accept="*/*"
                             multiple
                             onChange={(event) =>
                               addPhotosToEditingDish(event.target.files)
@@ -2471,7 +2558,7 @@ export default function RestaurantDetails() {
                   <input
                     ref={dishPhotoInputRef}
                     type="file"
-                    accept="image/*,video/*"
+                    accept="*/*"
                     multiple
                     onChange={(event) =>
                       handleAddDishPhotos(event.target.files)
@@ -2497,20 +2584,7 @@ export default function RestaurantDetails() {
                         )}
                         editable
                         onPrimaryChange={setNewDishPrimaryPhotoId}
-                        onRemovePhoto={(photoId) => {
-                          setNewDishPhotos((prev) => {
-                            const next = prev.filter(
-                              (photo) => photo.id !== photoId,
-                            );
-                            setNewDishPrimaryPhotoId((current) =>
-                              resolvePrimaryPhotoId(
-                                next,
-                                current === photoId ? undefined : current,
-                              ),
-                            );
-                            return next;
-                          });
-                        }}
+                        onRemovePhoto={handleRemoveNewDishPhoto}
                       />
                       {newDishPhotos.length > 1 && (
                         <div className="mt-3 flex items-center gap-3">
@@ -2670,7 +2744,7 @@ export default function RestaurantDetails() {
                     <input
                       ref={dishPhotoInputRef}
                       type="file"
-                      accept="image/*,video/*"
+                      accept="*/*"
                       multiple
                       onChange={(event) =>
                         handleAddDishPhotos(event.target.files)
@@ -2698,20 +2772,7 @@ export default function RestaurantDetails() {
                         )}
                         editable
                         onPrimaryChange={setNewDishPrimaryPhotoId}
-                        onRemovePhoto={(photoId) => {
-                          setNewDishPhotos((prev) => {
-                            const next = prev.filter(
-                              (photo) => photo.id !== photoId,
-                            );
-                            setNewDishPrimaryPhotoId((current) =>
-                              resolvePrimaryPhotoId(
-                                next,
-                                current === photoId ? undefined : current,
-                              ),
-                            );
-                            return next;
-                          });
-                        }}
+                        onRemovePhoto={handleRemoveNewDishPhoto}
                       />
 
                       {batchEntries.map((entry, index) => {
