@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { processInstagramImage } from '../lib/instagramProcessing';
+import { normalizeInstagramImage, processInstagramImage } from '../lib/instagramProcessing';
 import { api } from '../api';
 import { Restaurant, Dish } from '../types';
 import { useStore } from '../store/useStore';
@@ -55,6 +55,11 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
   const [isPublishing, setIsPublishing] = useState(false);
   const [captionText, setCaptionText] = useState('');
   const [dishAnalyses, setDishAnalyses] = useState<Map<string, { id: string, pros: string[], cons: string[], summary: string, verdict?: string, rank?: 1 | 2 | 3 | null }>>(new Map());
+  const normalizePhotoSequence = (sequence: typeof previews) => Promise.all(
+    sequence.map(async item => item.mediaType === 'image'
+      ? { ...item, url: await normalizeInstagramImage(item.url) }
+      : item)
+  );
   const [isCached, setIsCached] = useState(false);
   const hasExistingImages = !!restaurant.instaEditedPhotoUrl || dishes.some(d => !!d.instaEditedPhotoUrl);
 
@@ -249,7 +254,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
         }
       }
       
-      setPreviews(fullSequence);
+      setPreviews(await normalizePhotoSequence(fullSequence));
       setStep('preview');
     } catch (error) {
       console.error("Error processing images:", error);
@@ -258,7 +263,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
     }
   };
 
-  const loadExistingImages = () => {
+  const loadExistingImages = async () => {
     const fullSequence: typeof previews = [];
     let currentSelectedCount = 0;
 
@@ -326,8 +331,15 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
       }
     }
     
-    setPreviews(fullSequence);
-    setStep('preview');
+    setStep('generating');
+    try {
+      setPreviews(await normalizePhotoSequence(fullSequence));
+      setStep('preview');
+    } catch (error) {
+      console.error("Error normalizing existing Instagram images:", error);
+      alert("Failed to prepare existing images for Instagram.");
+      setStep('review');
+    }
   };
 
   const handleDownloadAll = () => {
@@ -452,7 +464,7 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
           {step === 'generating' && (
             <div className="flex flex-col items-center justify-center h-full p-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
-              <p className="text-gray-600">Drawing Instagram overlays (1:1 ratio)...</p>
+              <p className="text-gray-600">Drawing Instagram overlays (4:5 ratio)...</p>
             </div>
           )}
 
@@ -635,9 +647,9 @@ export const InstagramPreviewModal: React.FC<InstagramPreviewModalProps> = ({
                           />
                         </div>
                         {p.mediaType === 'video' ? (
-                          <video src={p.url} controls autoPlay muted loop playsInline preload="metadata" className="w-full object-contain rounded bg-black" style={{ aspectRatio: '1/1' }} />
+                          <video src={p.url} controls autoPlay muted loop playsInline preload="metadata" className="w-full object-contain rounded bg-black" style={{ aspectRatio: '4/5' }} />
                         ) : (
-                          <img src={p.url} alt={`Preview ${index}`} className="w-full object-contain rounded" style={{ aspectRatio: '1/1' }} />
+                          <img src={p.url} alt={`Preview ${index}`} className="w-full object-contain rounded" style={{ aspectRatio: '4/5' }} />
                         )}
                       </div>
                     ))}

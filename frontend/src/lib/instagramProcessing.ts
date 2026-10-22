@@ -1,5 +1,8 @@
 import { DishGeminiAnalysis } from '../types';
 
+const INSTAGRAM_IMAGE_WIDTH = 1080;
+const INSTAGRAM_IMAGE_HEIGHT = 1350;
+
 export const loadImage = (src: string): Promise<HTMLImageElement> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -8,6 +11,45 @@ export const loadImage = (src: string): Promise<HTMLImageElement> => {
     img.onerror = reject;
     img.src = src;
   });
+};
+
+export const normalizeInstagramImage = async (src: string): Promise<string> => {
+  const img = await loadImage(src);
+  if (
+    img.width === INSTAGRAM_IMAGE_WIDTH &&
+    img.height === INSTAGRAM_IMAGE_HEIGHT &&
+    src.startsWith('data:image/jpeg')
+  ) {
+    return src;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = INSTAGRAM_IMAGE_WIDTH;
+  canvas.height = INSTAGRAM_IMAGE_HEIGHT;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('No 2d context');
+
+  const bgScale = Math.max(INSTAGRAM_IMAGE_WIDTH / img.width, INSTAGRAM_IMAGE_HEIGHT / img.height) * 1.1;
+  const bgWidth = img.width * bgScale;
+  const bgHeight = img.height * bgScale;
+  ctx.filter = 'blur(40px)';
+  ctx.drawImage(img, (INSTAGRAM_IMAGE_WIDTH - bgWidth) / 2, (INSTAGRAM_IMAGE_HEIGHT - bgHeight) / 2, bgWidth, bgHeight);
+  ctx.filter = 'none';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+  ctx.fillRect(0, 0, INSTAGRAM_IMAGE_WIDTH, INSTAGRAM_IMAGE_HEIGHT);
+
+  const imageScale = Math.min(INSTAGRAM_IMAGE_WIDTH / img.width, INSTAGRAM_IMAGE_HEIGHT / img.height);
+  const drawWidth = img.width * imageScale;
+  const drawHeight = img.height * imageScale;
+  ctx.drawImage(
+    img,
+    (INSTAGRAM_IMAGE_WIDTH - drawWidth) / 2,
+    (INSTAGRAM_IMAGE_HEIGHT - drawHeight) / 2,
+    drawWidth,
+    drawHeight
+  );
+
+  return canvas.toDataURL('image/jpeg', 0.9);
 };
 
 const drawRoundedRect = (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) => {
@@ -118,8 +160,8 @@ export const processInstagramImage = async (
 
   const img = await loadImage(imgUrl);
   const canvas = document.createElement('canvas');
-  const CANVAS_WIDTH = 1080;
-  const CANVAS_HEIGHT = 1080;
+  const CANVAS_WIDTH = INSTAGRAM_IMAGE_WIDTH;
+  const CANVAS_HEIGHT = INSTAGRAM_IMAGE_HEIGHT;
   canvas.width = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
   
@@ -454,8 +496,8 @@ export const processInstagramCategory = async (
   options?: ProcessCategoryOptions
 ): Promise<string> => {
   const canvas = document.createElement('canvas');
-  const CANVAS_WIDTH = 1080;
-  const CANVAS_HEIGHT = 1080;
+  const CANVAS_WIDTH = INSTAGRAM_IMAGE_WIDTH;
+  const CANVAS_HEIGHT = INSTAGRAM_IMAGE_HEIGHT;
   canvas.width = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
   
@@ -489,7 +531,22 @@ export const processInstagramCategory = async (
     } else {
       const bgImgUrl = `/${theme}.png`;
       const bgImg = await loadImage(bgImgUrl);
-      ctx.drawImage(bgImg, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      const imgRatio = bgImg.width / bgImg.height;
+      const canvasRatio = CANVAS_WIDTH / CANVAS_HEIGHT;
+      let drawW, drawH, drawX, drawY;
+
+      if (imgRatio > canvasRatio) {
+        drawH = CANVAS_HEIGHT;
+        drawW = CANVAS_HEIGHT * imgRatio;
+        drawX = (CANVAS_WIDTH - drawW) / 2;
+        drawY = 0;
+      } else {
+        drawW = CANVAS_WIDTH;
+        drawH = CANVAS_WIDTH / imgRatio;
+        drawX = 0;
+        drawY = (CANVAS_HEIGHT - drawH) / 2;
+      }
+      ctx.drawImage(bgImg, drawX, drawY, drawW, drawH);
     }
   } catch (e) {
     console.error("Failed to load background image, falling back to solid color", e);
@@ -847,5 +904,3 @@ export const processInstagramCategory = async (
 
   return canvas.toDataURL('image/jpeg', 0.9);
 };
-
-
