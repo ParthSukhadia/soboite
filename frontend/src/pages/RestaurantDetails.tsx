@@ -18,6 +18,7 @@ import {
   Bell,
   Camera,
   Check,
+  Download,
   Merge,
   Copy,
   Bookmark,
@@ -298,6 +299,17 @@ export default function RestaurantDetails() {
       return bTime - aTime;
     });
   }, [dishes, id]);
+
+  const savedInstagramImages = useMemo(() => [
+    ...(restaurant?.instaEditedPhotoUrl
+      ? [{ name: restaurant.name, url: restaurant.instaEditedPhotoUrl }]
+      : []),
+    ...restaurantDishes.flatMap((dish) =>
+      dish.instaEditedPhotoUrl
+        ? [{ name: dish.name, url: dish.instaEditedPhotoUrl }]
+        : [],
+    ),
+  ], [restaurant, restaurantDishes]);
 
   const dishAverageRating = useMemo(() => {
     return averageRating(restaurantDishes.map((dish) => dish.rating));
@@ -840,6 +852,36 @@ export default function RestaurantDetails() {
         'error',
       );
     }
+  };
+
+  const handleCopyInstagramCaption = async () => {
+    if (!restaurant?.instaCaption) return;
+    try {
+      await navigator.clipboard.writeText(restaurant.instaCaption);
+      addToast('Instagram caption copied to clipboard.', 'success');
+    } catch (error) {
+      console.error('Failed to copy Instagram caption:', error);
+      addToast('Failed to copy Instagram caption.', 'error');
+    }
+  };
+
+  const handleDownloadInstagramImages = () => {
+    if (savedInstagramImages.length === 0) return;
+
+    savedInstagramImages.forEach((image, index) => {
+      const link = document.createElement('a');
+      const safeName = image.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') || `image-${index + 1}`;
+      link.href = image.url;
+      link.download = `instagram-ready-${safeName}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+
+    addToast(`Downloading ${savedInstagramImages.length} saved Instagram image${savedInstagramImages.length === 1 ? '' : 's'}.`, 'success');
   };
 
   const handleConfirmPublishInstagram = async (payload: { restaurantImage?: string, dishImages?: Record<string, string>, caption?: string, dishAnalyses?: any[], customMediaSequence?: { url: string, type: string }[] }) => {
@@ -1564,6 +1606,33 @@ export default function RestaurantDetails() {
             </div>
           )}
         </div>
+        {(restaurant?.instaCaption?.trim() || savedInstagramImages.length > 0) && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-purple-100 bg-purple-50/60 p-3">
+            <span className="mr-auto text-sm font-semibold text-purple-900">
+              Saved Instagram assets
+            </span>
+            {restaurant.instaCaption?.trim() && (
+              <button
+                type="button"
+                onClick={handleCopyInstagramCaption}
+                className="inline-flex items-center gap-2 rounded-lg border border-purple-200 bg-white px-3 py-2 text-sm font-semibold text-purple-800 hover:bg-purple-50"
+              >
+                <Copy size={15} />
+                Copy caption
+              </button>
+            )}
+            {savedInstagramImages.length > 0 && (
+              <button
+                type="button"
+                onClick={handleDownloadInstagramImages}
+                className="inline-flex items-center gap-2 rounded-lg bg-purple-700 px-3 py-2 text-sm font-semibold text-white hover:bg-purple-800"
+              >
+                <Download size={15} />
+                Download images ({savedInstagramImages.length})
+              </button>
+            )}
+          </div>
+        )}
         {typeof overallRating === "number" && (
           <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-900 border border-amber-200">
             <Star size={14} fill="currentColor" />
