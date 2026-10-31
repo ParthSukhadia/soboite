@@ -1449,37 +1449,37 @@ export default function MapPage() {
     {
       key: 'pizza',
       label: 'Pizza',
-      emoji: 'ðŸ•',
+      emoji: '🍕',
       keywords: ['pizza', 'slice', 'margherita', 'cheese', 'pizza']
     },
     {
       key: 'burger',
       label: 'Burger',
-      emoji: 'ðŸ”',
+      emoji: '🍔',
       keywords: ['burger', 'bun', 'patty', 'cheese', 'fries']
     },
     {
       key: 'south-indian',
       label: 'South Indian',
-      emoji: 'ðŸ¥˜',
+      emoji: '🥘',
       keywords: ['south indian', 'dosa', 'idli', 'uttapam', 'sambar', 'vada', 'filter coffee']
     },
     {
       key: 'chinese',
       label: 'Chinese',
-      emoji: 'ðŸ¥Ÿ',
+      emoji: '🥟',
       keywords: ['chinese', 'noodle', 'manchurian', 'dimsum', 'spring roll', 'hakka']
     },
     {
       key: 'street-food',
       label: 'Street food',
-      emoji: 'ðŸŒ¯',
+      emoji: '🌯',
       keywords: ['street', 'chaat', 'pav bhaji', 'bhel', 'samosa', 'kebab', 'vada pav', 'kulfi']
     },
     {
       key: 'dessert',
       label: 'Dessert',
-      emoji: 'ðŸ¨',
+      emoji: '🍨',
       keywords: ['dessert', 'sweet', 'ice cream', 'kulfi', 'rasmalai', 'gajar halwa']
     }
   ];
@@ -1785,7 +1785,7 @@ export default function MapPage() {
     }] : []),
     ...(costRange.min || costRange.max ? [{
       key: 'cost',
-      label: `â‚¹${costRange.min || '0'} - â‚¹${costRange.max || 'max'}`,
+      label: `₹${costRange.min || '0'} - ₹${costRange.max || 'max'}`,
       onRemove: () => setCostRange({ min: '', max: '' })
     }] : []),
     ...(filterRating !== null ? [{
@@ -1968,7 +1968,7 @@ export default function MapPage() {
                           onClick={() => setFilterRating(isActive ? null : stars)}
                           className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed ${isActive ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}
                         >
-                          {stars}+ â­
+                          {stars}+ ⭐
                         </button>
                       );
                     })}
@@ -1994,7 +1994,7 @@ export default function MapPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-gray-500 mb-2">Cost for two (â‚¹)</label>
+                  <label className="block text-[11px] font-semibold text-gray-500 mb-2">Cost for two (₹)</label>
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -2201,10 +2201,10 @@ export default function MapPage() {
                                 {rating ? rating.toFixed(1) : '--'}
                               </span>
                               <span>{rest.cuisine ?? rest.type ?? 'Restaurant'}</span>
-                              {rest.locationName && <span>â€¢ {rest.locationName}</span>}
+                              {rest.locationName && <span>• {rest.locationName}</span>}
                             </div>
                             <div className="text-[11px] text-white/80">
-                              {rest.costForTwo ? `â‚¹${rest.costForTwo} for two` : 'Cost unknown'}
+                              {rest.costForTwo ? `₹${rest.costForTwo} for two` : 'Cost unknown'}
                             </div>
                           </div>
                           <button
@@ -2521,7 +2521,7 @@ export default function MapPage() {
                             onClick={() => void handleGeocodeAddressForForm()}
                             className="px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                           >
-                            {isGeocodingAddress ? 'Findingâ€¦' : 'Find on Map'}
+                            {isGeocodingAddress ? 'Finding…' : 'Find on Map'}
                           </button>
                         </div>
                         <p className="mt-1 text-xs text-gray-400">Enter address then tap "Find on Map" to drop the pin automatically.</p>
@@ -2606,7 +2606,7 @@ export default function MapPage() {
                         </div>
                       ) : (
                         <div className="p-3 bg-green-50 border border-green-200 text-green-700 rounded-xl text-center text-sm">
-                          ðŸ“ Pin set at {validPinLatLng.lat.toFixed(5)}, {validPinLatLng.lng.toFixed(5)}
+                          📍 Pin set at {validPinLatLng.lat.toFixed(5)}, {validPinLatLng.lng.toFixed(5)}
                         </div>
                       )}
                     </div>
@@ -2701,7 +2701,7 @@ export default function MapPage() {
                         </div>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Cost for two (â‚¹)</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Cost for two (₹)</label>
                         <input name="costForTwo" type="number" min="0" value={draftCostForTwo} onChange={(e) => setDraftCostForTwo(e.target.value)} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none" placeholder="600" />
                       </div>
 
@@ -2806,7 +2806,7 @@ export default function MapPage() {
                                       />
                                     </div>
                                     <div>
-                                      <label className="block text-sm font-medium text-gray-700 mb-1">Actual Price (â‚¹)</label>
+                                      <label className="block text-sm font-medium text-gray-700 mb-1">Actual Price (₹)</label>
                                       <input
                                         type="number"
                                         min="1"

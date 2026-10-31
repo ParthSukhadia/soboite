@@ -36,7 +36,7 @@ export interface Restaurant {
   createdAt?: number;
   likeCount?: number;
   instaPublished?: boolean;
-  instaPublishedAt?: string;
+  instaPublishedAt?: string | null;
   instaEditedPhotoUrl?: string;
   instaCaption?: string;
   poll1Count?: number;

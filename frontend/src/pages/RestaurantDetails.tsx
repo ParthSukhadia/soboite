@@ -17,6 +17,7 @@ import {
   X,
   Bell,
   Camera,
+  Check,
   Merge,
   Copy,
   Bookmark,
@@ -815,6 +816,32 @@ export default function RestaurantDetails() {
     setShowInstagramPreview(true);
   };
 
+  const handleToggleInstagramPublished = async () => {
+    if (!editMode) {
+      addToast('Admin login required to update Instagram status.', 'error');
+      return;
+    }
+    if (!restaurant || isApiBusy) return;
+
+    const instaPublished = !restaurant.instaPublished;
+    try {
+      await updateRestaurant(restaurant.id, {
+        instaPublished,
+        instaPublishedAt: instaPublished ? new Date().toISOString() : null,
+      });
+      addToast(
+        instaPublished ? 'Restaurant marked as Instagram published.' : 'Restaurant marked as unpublished.',
+        'success',
+      );
+    } catch (error) {
+      console.error('Failed to update Instagram published status:', error);
+      addToast(
+        error instanceof Error ? `Failed to update Instagram status: ${error.message}` : 'Failed to update Instagram status.',
+        'error',
+      );
+    }
+  };
+
   const handleConfirmPublishInstagram = async (payload: { restaurantImage?: string, dishImages?: Record<string, string>, caption?: string, dishAnalyses?: any[], customMediaSequence?: { url: string, type: string }[] }) => {
     if (!editMode) {
       addToast('Admin login required to publish to Instagram.', 'error');
@@ -1481,6 +1508,20 @@ export default function RestaurantDetails() {
               >
                 <Camera size={16} />
                 Publish to Instagram
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleInstagramPublished}
+                disabled={isApiBusy}
+                aria-pressed={Boolean(restaurant.instaPublished)}
+                className={`inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-60 ${
+                  restaurant.instaPublished
+                    ? 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                {restaurant.instaPublished ? <X size={16} /> : <Check size={16} />}
+                {restaurant.instaPublished ? 'Mark as Unpublished' : 'Mark as Published'}
               </button>
               <button 
                 onClick={handlePushNotification}
@@ -3186,4 +3227,3 @@ export default function RestaurantDetails() {
     </div>
   );
 }
-
