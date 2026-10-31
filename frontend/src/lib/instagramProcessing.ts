@@ -269,65 +269,56 @@ export const processInstagramImage = async (
   if (type === 'dish' && analysis) {
     // --- DRAW BOTTOM DISH OVERLAY ---
     const boxX = 40;
-    const boxH = 300;
-    const boxY = CANVAS_HEIGHT - 340;
     const boxW = CANVAS_WIDTH - 80;
+    const leftColX = boxX + 20;
+    const dividerX = boxX + boxW * 0.6;
+    const rightColX = dividerX + 24;
+    const textWidth = dividerX - leftColX - 65;
+    ctx.font = `normal 34px ${modernFont}`;
+    const reviewItems = [
+      ...(analysis.pros ?? []).slice(0, 3).map((text: string) => ({ text, icon: '✔', color: '#10b981', textColor: '#f3f4f6' })),
+      ...(analysis.cons ?? []).slice(0, 2).map((text: string) => ({ text, icon: '✖', color: '#f43f5e', textColor: '#d1d5db' }))
+    ].map((item) => ({ ...item, lines: wrapText(ctx, item.text, textWidth) }));
+    const reviewHeight = reviewItems.reduce((height, item) => height + item.lines.length * 45 + 10, 0);
+    const hasPrice = Boolean(target.actualPrice || target.actual_price);
+    const rightColumnHeight = hasPrice ? 254 : 214;
+    const locationHeight = locName ? 50 : 25;
+    const boxH = Math.max(rightColumnHeight, 25 + reviewHeight + locationHeight);
+    const boxY = CANVAS_HEIGHT - boxH - 40;
 
-    ctx.fillStyle = 'rgba(15, 15, 15, 0.85)';
+    ctx.fillStyle = 'rgba(15, 15, 15, 0.5)';
     drawRoundedRect(ctx, boxX, boxY, boxW, boxH, 24);
     ctx.fill();
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    const leftColX = boxX + 40;
-    const rightColX = boxX + boxW - 380;
-    let startY = boxY + 50;
+    let startY = boxY + 25;
 
     // Left Column (Pros & Cons)
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top'; // better for wrapped text
     ctx.font = `normal 34px ${modernFont}`;
-    
-    // Draw Pros
-    if (analysis.pros && analysis.pros.length > 0) {
-      analysis.pros.slice(0, 3).forEach((pro: string) => {
-        ctx.fillStyle = '#10b981'; // Aesthetic green
-        ctx.fillText("✔", leftColX, startY);
-        ctx.fillStyle = '#f3f4f6';
-        const lines = wrapText(ctx, pro, rightColX - leftColX - 80);
-        lines.forEach(line => {
-          ctx.fillText(line, leftColX + 45, startY);
-          startY += 45;
-        });
-        startY += 10; // extra spacing between items
+    reviewItems.forEach((item) => {
+      ctx.fillStyle = item.color;
+      ctx.fillText(item.icon, leftColX, startY);
+      ctx.fillStyle = item.textColor;
+      item.lines.forEach((line) => {
+        ctx.fillText(line, leftColX + 45, startY);
+        startY += 45;
       });
-    }
-
-    // Draw Cons
-    if (analysis.cons && analysis.cons.length > 0) {
-      analysis.cons.slice(0, 2).forEach((con: string) => {
-        ctx.fillStyle = '#f43f5e'; // Aesthetic red
-        ctx.fillText("✖", leftColX, startY);
-        ctx.fillStyle = '#d1d5db';
-        const lines = wrapText(ctx, con, rightColX - leftColX - 80);
-        lines.forEach(line => {
-          ctx.fillText(line, leftColX + 45, startY);
-          startY += 45;
-        });
-        startY += 10;
-      });
-    }
+      startY += 10;
+    });
 
     // Divider line between columns
     ctx.beginPath();
-    ctx.moveTo(rightColX - 40, boxY + 40);
-    ctx.lineTo(rightColX - 40, boxY + boxH - 40); // Extended to bottom
+    ctx.moveTo(dividerX, boxY + 20);
+    ctx.lineTo(dividerX, boxY + boxH - 20);
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
     ctx.stroke();
 
     // Right Column (Rating & Summary)
-    const rightY = boxY + 70;
+    const rightY = boxY + 35;
     
     // Star rating
     ctx.font = `bold 56px ${modernFont}`;
@@ -342,11 +333,6 @@ export const processInstagramImage = async (
     ctx.fillStyle = '#9ca3af';
     ctx.fillText("/ 5", rightColX + 160, rightY);
     
-    ctx.fillStyle = '#fbbf24';
-    let label = target.rating >= 4.5 ? "Excellent" : (target.rating >= 4.0 ? "Good" : (target.rating >= 3.0 ? "Average" : "Poor"));
-    if (!target.rating) label = "Unrated";
-    ctx.fillText(label, rightColX + 220, rightY);
-
     let nextY = rightY + 80;
     
     let verdictStr = analysis.verdict || (target.isRecommended || target.is_recommended ? "Must try" : "Okayish");
@@ -383,7 +369,7 @@ export const processInstagramImage = async (
 
 
     // Bottom Row
-    const btmY = boxY + boxH - 50;
+    const btmY = boxY + boxH - 25;
     ctx.textBaseline = 'middle';
     ctx.font = `normal 32px ${modernFont}`;
     
@@ -392,39 +378,6 @@ export const processInstagramImage = async (
       ctx.fillText("📍", leftColX, btmY);
       ctx.fillStyle = '#d1d5db';
       ctx.fillText(locName, leftColX + 40, btmY);
-    }
-
-    if (analysis.rank) {
-      // Position inside the rectangle, bottom right
-      const badgeX = boxX + boxW - 80;
-      const badgeY = boxY + boxH - 70;
-      
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      
-      // Sparkles
-      ctx.font = '25px Arial';
-      ctx.fillText('✨', badgeX - 40, badgeY - 25);
-      ctx.fillText('✨', badgeX + 40, badgeY - 5);
-      ctx.fillText('✨', badgeX - 15, badgeY + 30);
-
-      // Apply filter for silver and bronze
-      if (analysis.rank === 2) {
-        ctx.filter = 'grayscale(100%) brightness(120%)';
-      } else if (analysis.rank === 3) {
-        ctx.filter = 'sepia(100%) hue-rotate(330deg) saturate(150%) brightness(80%)';
-      }
-
-      // Crown (half size)
-      ctx.font = '110px Arial';
-      ctx.fillText('👑', badgeX, badgeY);
-
-      // Reset filter
-      ctx.filter = 'none';
-
-      // Restore
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
     }
 
   } else if (type === 'restaurant') {

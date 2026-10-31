@@ -15,15 +15,12 @@ import {
   ThumbsUp,
   ThumbsDown,
   X,
-  Bell,
   Camera,
   Check,
   Download,
   Merge,
   Copy,
-  Bookmark,
-  Video,
-  Film
+  Bookmark
 } from "lucide-react";
 import { useForm as useRHForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -36,8 +33,6 @@ import CachedImage from "../components/CachedImage";
 import { InstagramPreviewModal } from "../components/InstagramPreviewModal";
 import { useToast } from '../components/Toast';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { StoryGeneratorModal } from '../components/StoryGeneratorModal';
-import { ReelGeneratorModal } from '../components/ReelGeneratorModal';
 import { useStore } from "../store/useStore";
 import { Dish, DishReview, PhotoEntry, restaurantHasDishes } from "../types";
 import { optimizeImage } from "../lib/imageOptimization";
@@ -395,7 +390,6 @@ export default function RestaurantDetails() {
     useState<DishEditDraft | null>(null);
 
   const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
-  const [isGeneratingEmbeddings, setIsGeneratingEmbeddings] = useState(false);
 
   const handleGenerateInsightsForEditingDish = async () => {
   if (!editingDishDraft) return;
@@ -429,16 +423,16 @@ export default function RestaurantDetails() {
   };
 
   const [showInstagramPreview, setShowInstagramPreview] = useState(false);
+  const [isSavingInstagramAssets, setIsSavingInstagramAssets] = useState(false);
 
   const [isSavingDish, setIsSavingDish] = useState(false);
   const [isSavingRestaurantPhoto, setIsSavingRestaurantPhoto] = useState(false);
   const [isSavingMetrics, setIsSavingMetrics] = useState(false);
   const [isDeletingRestaurant, setIsDeletingRestaurant] = useState(false);
-  const [isStoryModalOpen, setIsStoryModalOpen] = useState(false);
-  const [isReelModalOpen, setIsReelModalOpen] = useState(false);
   const [deletingDishIds, setDeletingDishIds] = useState<string[]>([]);
   const [isBootstrappingRestaurant, setIsBootstrappingRestaurant] =
     useState(true);
+  const [isLoadingInstagramAssets, setIsLoadingInstagramAssets] = useState(true);
   const [loadingPhotos, setLoadingPhotos] = useState(true);
   const [restaurantPhotoDraft, setRestaurantPhotoDraft] = useState<PhotoEntry[] | null>(null);
   const [restaurantPhotoPrimaryDraft, setRestaurantPhotoPrimaryDraft] = useState<string | undefined>(undefined);
@@ -487,14 +481,14 @@ export default function RestaurantDetails() {
     const bootstrap = async () => {
       if (restaurants.length > 0) {
         if (active) setIsBootstrappingRestaurant(false);
-        // Trigger a background fetch to ensure stale/imageless cache gets populated
-        void fetchData();
-        return;
       }
       try {
         await fetchData();
       } finally {
-        if (active) setIsBootstrappingRestaurant(false);
+        if (active) {
+          setIsBootstrappingRestaurant(false);
+          setIsLoadingInstagramAssets(false);
+        }
       }
     };
 
@@ -721,46 +715,6 @@ export default function RestaurantDetails() {
     }
   };
 
-  const executePushNotification = async () => {
-    try {
-      await api.sendPushNotification(restaurant.name);
-      addToast('Notification sent successfully!', 'success');
-    } catch (err: any) {
-      console.error('Push notification failed:', err);
-      addToast('Notification simulated (Endpoint missing). Sent message to enabled users.', 'info');
-    }
-  };
-
-  const handleGenerateEmbeddings = async () => {
-    if (!restaurant || isGeneratingEmbeddings) return;
-    setIsGeneratingEmbeddings(true);
-    addToast('Generating embeddings for all dishes...', 'info');
-    try {
-      const res = await api.generateEmbeddings(restaurant.id);
-      if (res.success) {
-        addToast(res.message || 'Embeddings generated successfully!', 'success');
-      } else {
-        addToast('Failed to generate embeddings', 'error');
-      }
-    } catch (err: any) {
-      console.error('Embedding generation failed:', err);
-      addToast(`Error: ${err.message}`, 'error');
-    } finally {
-      setIsGeneratingEmbeddings(false);
-    }
-  };
-
-  const handlePushNotification = () => {
-    if (!restaurant || isApiBusy) return;
-    setConfirmModal({
-      isOpen: true,
-      title: 'Send Push Notification',
-      message: `Send push notification for ${restaurant.name}?`,
-      isDestructive: false,
-      action: executePushNotification
-    });
-  };
-
   const handleCopyToClipboard = async () => {
     if (!restaurant) return;
     
@@ -890,6 +844,7 @@ export default function RestaurantDetails() {
       return;
     }
     if (!restaurant) return;
+    setIsSavingInstagramAssets(true);
     try {
       addToast('Uploading custom images and publishing to Instagram... This may take a few seconds.', 'info');
       
@@ -922,10 +877,14 @@ export default function RestaurantDetails() {
       const res = await api.publishToInstagram(restaurant.id, structuredPayload);
       if (res.success) {
         addToast('Successfully published to Instagram!' + (res.url ? ` URL: ${res.url}` : ''), 'success');
-        updateRestaurant(restaurant.id, { instaPublished: true, instaPublishedAt: new Date().toISOString(), instaEditedPhotoUrl: uploadedRestaurantUrl });
-        // Also update dishes
-        for (const _dishId of Object.keys(uploadedDishUrls)) {
-          // You could call updateDish if you have it in context, or just reload.
+        updateRestaurant(restaurant.id, {
+          instaPublished: true,
+          instaPublishedAt: new Date().toISOString(),
+          ...(uploadedRestaurantUrl ? { instaEditedPhotoUrl: uploadedRestaurantUrl } : {}),
+          ...(payload.caption?.trim() ? { instaCaption: payload.caption } : {})
+        });
+        for (const [dishId, imageUrl] of Object.entries(uploadedDishUrls)) {
+          updateDish(dishId, { instaEditedPhotoUrl: imageUrl });
         }
       } else {
         addToast('Failed to publish to Instagram.', 'error');
@@ -933,6 +892,8 @@ export default function RestaurantDetails() {
     } catch (err: any) {
       console.error('Instagram publish failed:', err);
       addToast('Failed to publish to Instagram: ' + err.message, 'error');
+    } finally {
+      setIsSavingInstagramAssets(false);
     }
   };
 
@@ -1566,22 +1527,6 @@ export default function RestaurantDetails() {
                 {restaurant.instaPublished ? 'Mark as Unpublished' : 'Mark as Published'}
               </button>
               <button 
-                onClick={handlePushNotification}
-                disabled={isApiBusy}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-60"
-              >
-                <Bell size={16} />
-                Push Notification
-              </button>
-              <button 
-                onClick={handleGenerateEmbeddings}
-                disabled={isApiBusy || isGeneratingEmbeddings}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 transition-colors disabled:opacity-60"
-              >
-                {isGeneratingEmbeddings ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
-                Generate Embeddings
-              </button>
-              <button 
                 onClick={handleCopyToClipboard}
                 disabled={isApiBusy}
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60"
@@ -1589,29 +1534,19 @@ export default function RestaurantDetails() {
                 <Copy size={16} />
                 Copy Details
               </button>
-              <button
-                onClick={() => setIsStoryModalOpen(true)}
-                className="inline-flex justify-center items-center gap-2 px-4 py-2 text-sm rounded-xl border border-slate-900 bg-slate-900 text-white hover:bg-slate-800 transition-colors font-semibold"
-              >
-                <Video size={16} />
-                Story Video
-              </button>
-              <button 
-                onClick={() => setIsReelModalOpen(true)}
-                className="inline-flex justify-center items-center gap-2 px-4 py-2 text-sm rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white transition-colors font-semibold"
-              >
-                <Film size={16} />
-                Generate Reel
-              </button>
             </div>
           )}
         </div>
-        {(restaurant?.instaCaption?.trim() || savedInstagramImages.length > 0) && (
-          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-purple-100 bg-purple-50/60 p-3">
-            <span className="mr-auto text-sm font-semibold text-purple-900">
-              Saved Instagram assets
-            </span>
-            {restaurant.instaCaption?.trim() && (
+        <div
+          aria-live="polite"
+          className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-purple-100 bg-purple-50/60 p-3"
+        >
+          <span className="mr-auto text-sm font-semibold text-purple-900">
+            Saved Instagram assets
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-purple-900">Caption:</span>
+            {restaurant.instaCaption?.trim() ? (
               <button
                 type="button"
                 onClick={handleCopyInstagramCaption}
@@ -1620,7 +1555,17 @@ export default function RestaurantDetails() {
                 <Copy size={15} />
                 Copy caption
               </button>
+            ) : isLoadingInstagramAssets || isSavingInstagramAssets ? (
+              <span className="inline-flex items-center gap-1.5 text-sm text-purple-700">
+                <Loader2 size={14} className="animate-spin" />
+                {isSavingInstagramAssets ? 'Saving...' : 'Loading...'}
+              </span>
+            ) : (
+              <span className="text-sm text-gray-500">Not present</span>
             )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-purple-900">Edited images:</span>
             {savedInstagramImages.length > 0 && (
               <button
                 type="button"
@@ -1631,8 +1576,16 @@ export default function RestaurantDetails() {
                 Download images ({savedInstagramImages.length})
               </button>
             )}
+            {isLoadingInstagramAssets || isSavingInstagramAssets ? (
+              <span className="inline-flex items-center gap-1.5 text-sm text-purple-700">
+                <Loader2 size={14} className="animate-spin" />
+                {isSavingInstagramAssets ? 'Saving...' : 'Loading...'}
+              </span>
+            ) : savedInstagramImages.length === 0 ? (
+              <span className="text-sm text-gray-500">Not present</span>
+            ) : null}
           </div>
-        )}
+        </div>
         {typeof overallRating === "number" && (
           <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-900 border border-amber-200">
             <Star size={14} fill="currentColor" />
@@ -3272,11 +3225,6 @@ export default function RestaurantDetails() {
         restaurant={restaurant}
         dishes={restaurantDishes}
       />
-      <StoryGeneratorModal
-        isOpen={isStoryModalOpen}
-        onClose={() => setIsStoryModalOpen(false)}
-        restaurant={restaurant}
-      />
       <ConfirmModal
         isOpen={confirmModal.isOpen}
         title={confirmModal.title}
@@ -3286,12 +3234,6 @@ export default function RestaurantDetails() {
           if (confirmModal.action) void confirmModal.action();
         }}
         onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
-      />
-      <ReelGeneratorModal 
-        restaurant={restaurant}
-        dishes={restaurantDishes}
-        isOpen={isReelModalOpen}
-        onClose={() => setIsReelModalOpen(false)}
       />
     </div>
   );
