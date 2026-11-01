@@ -119,41 +119,12 @@ app.get('/api/events', async (c) => {
 
 // Get all restaurants
 app.get('/api/restaurants', async (c) => {
-  const isAdmin = c.req.header('x-admin-access') === 'true';
-  console.log(`[/api/restaurants] isAdmin=${isAdmin}, header=${c.req.header('x-admin-access')}`);
-
   const { data, error } = await querySupabaseOrProxy(c, (supabase) =>
     supabase.from('restaurants_with_likes').select('id, name, lat, lng, location_name, address, veg_only, notes, photos, primary_photo_id, image_storage_url, type, cuisine, cost_for_two, ambience_rating, service_rating, created_at, insta_published, insta_published_at, insta_edited_photo_url, instagram_caption, poll_1_count, poll_2_count, poll_3_count, poll_4_count')
   );
   if (error) return c.json({ error: error.message }, 500);
 
-  console.log(`[/api/restaurants] Got ${data?.length || 0} restaurants from DB`);
-
-  // If not admin, filter out restaurants without dishes
-  if (!isAdmin && data) {
-    // Fetch all dishes to know which restaurants have content
-    const { data: allDishes, error: dishesError } = await querySupabaseOrProxy(c, (supabase) =>
-      supabase.from('dishes').select('restaurant_id')
-    );
-
-    if (dishesError) {
-      console.error('Error fetching dishes for filtering:', dishesError);
-      // If we can't fetch dishes, return empty list to be safe
-      return c.json([]);
-    }
-
-    // Create a set of restaurant IDs that have at least one dish
-    const restaurantIdsWithDishes = new Set<string>(
-      (allDishes as any[]).map((d: any) => d.restaurant_id)
-    );
-
-    const filtered = data.filter((r: any) => restaurantIdsWithDishes.has(r.id));
-    console.log(`[/api/restaurants] Filtered ${data.length} → ${filtered.length} restaurants (removed ${data.length - filtered.length} empty ones)`);
-    // Filter restaurants to only show those with dishes
-    return c.json(filtered);
-  }
-
-  console.log(`[/api/restaurants] Admin user or error - returning all ${data?.length || 0} restaurants`);
+  console.log(`[/api/restaurants] Returning ${data?.length || 0} restaurants`);
   return c.json(data);
 });
 

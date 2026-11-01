@@ -176,21 +176,6 @@ const getLikeText = (hasLiked: boolean | null | undefined, count: number) => {
 };
 
 
-const FilePreview = ({ file }: { file: File }) => {
-  const [url, setUrl] = useState("");
-  useEffect(() => {
-    const objUrl = URL.createObjectURL(file);
-    setUrl(objUrl);
-    return () => URL.revokeObjectURL(objUrl);
-  }, [file]);
-  if (!url) return null;
-  return file.type.startsWith("video/") ? (
-    <video src={url} className="w-16 h-16 object-cover rounded-lg border border-white/20 shrink-0 shadow-sm bg-white/10" />
-  ) : (
-    <img src={url} alt="preview" className="w-16 h-16 object-cover rounded-lg border border-white/20 shrink-0 shadow-sm bg-white/10" />
-  );
-};
-
 export default function RestaurantDetails() {
 
   const { id } = useParams();
@@ -365,6 +350,12 @@ export default function RestaurantDetails() {
   const [newDishPrimaryPhotoId, setNewDishPrimaryPhotoId] = useState<
     string | undefined
   >();
+  const [temporaryGallery, setTemporaryGallery] = useState<PhotoEntry[]>([]);
+  const [showTemporaryGallery, setShowTemporaryGallery] = useState(false);
+  const [selectedGalleryPhotoIds, setSelectedGalleryPhotoIds] = useState<string[]>([]);
+  const [gallerySelectionTarget, setGallerySelectionTarget] = useState<
+    { type: "new" } | { type: "edit"; dishId: string } | { type: "restaurant" }
+  >({ type: "new" });
   const [batchMode, setBatchMode] = useState(false);
   const [batchEntries, setBatchEntries] = useState<
     Array<{
@@ -381,9 +372,6 @@ export default function RestaurantDetails() {
       serves: string;
     }>
   >([]);
-  const [uploadChoiceOpen, setUploadChoiceOpen] = useState(false);
-  const topLevelUploadRef = useRef(false);
-  const [pendingDishFiles, setPendingDishFiles] = useState<File[]>([]);
   const [addDishError, setAddDishError] = useState<string | null>(null);
   const [editingDishId, setEditingDishId] = useState<string | null>(null);
   const [editingDishDraft, setEditingDishDraft] =
@@ -437,9 +425,7 @@ export default function RestaurantDetails() {
   const [restaurantPhotoDraft, setRestaurantPhotoDraft] = useState<PhotoEntry[] | null>(null);
   const [restaurantPhotoPrimaryDraft, setRestaurantPhotoPrimaryDraft] = useState<string | undefined>(undefined);
 
-  const restaurantPhotoInputRef = useRef<HTMLInputElement | null>(null);
-  const dishPhotoInputRef = useRef<HTMLInputElement | null>(null);
-  const editDishPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const temporaryGalleryInputRef = useRef<HTMLInputElement | null>(null);
 
   const {
     register,
@@ -622,22 +608,6 @@ export default function RestaurantDetails() {
       primaryPhotoId: nextPrimaryPhotoId,
       imageStorageUrl: resolvePrimaryPhotoUrl(photos, nextPrimaryPhotoId) ?? "",
     });
-  };
-
-  const handleRestaurantPhotoUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0 || isApiBusy) return;
-    setIsSavingRestaurantPhoto(true);
-    try {
-      const incoming = await filesToPhotos(files);
-      if (incoming.length > 0) {
-        setRestaurantPhotoDraft((current) => [...(current ?? savedRestaurantPhotos), ...incoming]);
-      }
-    } finally {
-      setIsSavingRestaurantPhoto(false);
-      if (restaurantPhotoInputRef.current) {
-        restaurantPhotoInputRef.current.value = "";
-      }
-    }
   };
 
   const executeRestaurantPhotoRemove = (photoId: string) => {
@@ -1032,63 +1002,8 @@ export default function RestaurantDetails() {
     );
   };
 
-  const addPhotosToEditingDish = async (files: FileList | null) => {
-    if (!editingDishDraft || !files || files.length === 0 || isApiBusy) return;
-    const incoming = await filesToPhotos(files);
-    const combined = [...editingDishDraft.photos, ...incoming];
-    updateEditingDraft(editingDishId!, {
-      photos: combined,
-      primaryPhotoId: resolvePrimaryPhotoId(
-        combined,
-        editingDishDraft.primaryPhotoId,
-      ),
-    });
-    if (editDishPhotoInputRef.current) {
-      editDishPhotoInputRef.current.value = "";
-    }
-  };
-
   const toggleBatchMode = () => {
     setBatchMode((v) => !v);
-  };
-
-  const closeUploadChoiceModal = () => {
-    setUploadChoiceOpen(false);
-    setPendingDishFiles([]);
-  };
-
-  const applyPendingDishFiles = async (separate: boolean) => {
-    const files = pendingDishFiles;
-    if (files.length === 0) {
-      closeUploadChoiceModal();
-      return;
-    }
-
-    closeUploadChoiceModal();
-    setShowAddDish(true);
-    
-    if (separate) {
-      setBatchMode(true);
-    } else {
-      setBatchMode(false);
-      setBatchEntries([]);
-    }
-
-    setIsSavingDish(true);
-    try {
-      const incoming = await filesToPhotos(files);
-      setNewDishPhotos((prev) => {
-        const next = [...prev, ...incoming];
-        setNewDishPrimaryPhotoId((current) =>
-          resolvePrimaryPhotoId(next, current),
-        );
-        return next;
-      });
-    } catch (err) {
-      console.error("Error processing files:", err);
-    } finally {
-      setIsSavingDish(false);
-    }
   };
 
   const updateBatchEntry = (index: number, patch: Partial<typeof batchEntries[number]>) => {
@@ -1110,12 +1025,99 @@ export default function RestaurantDetails() {
     });
   };
 
-  const openAddAndPick = () => {
+  const openAddDishForm = () => {
     setShowAddDish(true);
     setAddDishError(null);
     setDishNameDuplicateError(null);
-    topLevelUploadRef.current = true;
-    setTimeout(() => dishPhotoInputRef.current?.click(), 60);
+  };
+
+  const openTemporaryGalleryForNewDish = () => {
+    setGallerySelectionTarget({ type: "new" });
+    setSelectedGalleryPhotoIds([]);
+    setShowTemporaryGallery(true);
+  };
+
+  const openTemporaryGalleryForEditingDish = (dishId: string) => {
+    setGallerySelectionTarget({ type: "edit", dishId });
+    setSelectedGalleryPhotoIds([]);
+    setShowTemporaryGallery(true);
+  };
+
+  const openTemporaryGalleryForRestaurant = () => {
+    setGallerySelectionTarget({ type: "restaurant" });
+    setSelectedGalleryPhotoIds([]);
+    setShowTemporaryGallery(true);
+  };
+
+  const addFilesToTemporaryGallery = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setIsSavingDish(true);
+    try {
+      const incoming = await filesToPhotos(files);
+      setTemporaryGallery((current) => [...current, ...incoming]);
+    } catch (error) {
+      console.error("Error adding media to the temporary gallery:", error);
+    } finally {
+      setIsSavingDish(false);
+      if (temporaryGalleryInputRef.current) {
+        temporaryGalleryInputRef.current.value = "";
+      }
+    }
+  };
+
+  const addSelectedGalleryPhotos = () => {
+    const selectedPhotos = temporaryGallery.filter((photo) =>
+      selectedGalleryPhotoIds.includes(photo.id),
+    );
+    if (selectedPhotos.length === 0) return;
+
+    if (gallerySelectionTarget.type === "restaurant") {
+      const currentPhotos = restaurantPhotoDraft ?? savedRestaurantPhotos;
+      const existingIds = new Set(currentPhotos.map((photo) => photo.id));
+      const photos = [
+        ...currentPhotos,
+        ...selectedPhotos.filter((photo) => !existingIds.has(photo.id)),
+      ];
+      setRestaurantPhotoDraft(photos);
+      setRestaurantPhotoPrimaryDraft((primaryId) =>
+        resolvePrimaryPhotoId(photos, primaryId ?? restaurantPrimaryPhotoId),
+      );
+    } else if (gallerySelectionTarget.type === "edit") {
+      setEditingDishDraft((current) => {
+        if (!current) return current;
+        const existingIds = new Set(current.photos.map((photo) => photo.id));
+        const photos = [
+          ...current.photos,
+          ...selectedPhotos.filter((photo) => !existingIds.has(photo.id)),
+        ];
+        return {
+          ...current,
+          photos,
+          primaryPhotoId: resolvePrimaryPhotoId(photos, current.primaryPhotoId),
+        };
+      });
+    } else {
+      setNewDishPhotos((current) => {
+        const existingIds = new Set(current.map((photo) => photo.id));
+        const next = [
+          ...current,
+          ...selectedPhotos.filter((photo) => !existingIds.has(photo.id)),
+        ];
+        setNewDishPrimaryPhotoId((primaryId) =>
+          resolvePrimaryPhotoId(next, primaryId),
+        );
+        return next;
+      });
+      setShowAddDish(true);
+      setAddDishError(null);
+    }
+    setSelectedGalleryPhotoIds([]);
+    setShowTemporaryGallery(false);
+  };
+
+  const closeTemporaryGallery = () => {
+    setSelectedGalleryPhotoIds([]);
+    setShowTemporaryGallery(false);
   };
 
   const submitBatch = async () => {
@@ -1263,42 +1265,6 @@ export default function RestaurantDetails() {
     }
   };
 
-  const handleAddDishPhotos = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const isTopLevel = topLevelUploadRef.current;
-    topLevelUploadRef.current = false;
-    // Ensure add-dish form is visible when photos chosen
-    setShowAddDish(true);
-    if (files.length > 1 && isTopLevel) {
-      setPendingDishFiles(Array.from(files));
-      setUploadChoiceOpen(true);
-      if (dishPhotoInputRef.current) {
-        dishPhotoInputRef.current.value = "";
-      }
-      return;
-    }
-
-    setIsSavingDish(true);
-    try {
-      const incoming = await filesToPhotos(files);
-      setNewDishPhotos((prev) => {
-        const next = [...prev, ...incoming];
-        setNewDishPrimaryPhotoId((current) =>
-          resolvePrimaryPhotoId(next, current),
-        );
-        return next;
-      });
-    } catch (err) {
-      console.error("Error processing single dish photo upload:", err);
-    } finally {
-      setIsSavingDish(false);
-    }
-
-    if (dishPhotoInputRef.current) {
-      dishPhotoInputRef.current.value = "";
-    }
-  };
-
   const onSubmit = async (data: DishForm) => {
     if (isApiBusy) return;
 
@@ -1430,28 +1396,14 @@ export default function RestaurantDetails() {
           />
           {editMode && (
             <div className="flex items-center gap-2 flex-wrap">
-              <input
-                ref={restaurantPhotoInputRef}
-                type="file"
-                accept="image/*,video/*"
-                multiple
-                onChange={(event) =>
-                  handleRestaurantPhotoUpload(event.target.files)
-                }
-                className="hidden"
-              />
               <button
                 type="button"
-                onClick={() => restaurantPhotoInputRef.current?.click()}
+                onClick={openTemporaryGalleryForRestaurant}
                 disabled={isApiBusy}
                 className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {isSavingRestaurantPhoto ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <ImagePlus size={14} />
-                )}
-                Add restaurant photos
+                <ImagePlus size={14} />
+                Add restaurant photos/videos from pool
               </button>
               {restaurantPhotoDraft !== null && (
                 <>
@@ -1816,12 +1768,86 @@ export default function RestaurantDetails() {
         </h2>
       </div>
 
+      {editMode && (
+        <section className="mb-5 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-gray-900">Temporary gallery</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Add photos and videos here first, then choose them when adding a dish.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => temporaryGalleryInputRef.current?.click()}
+                disabled={isApiBusy}
+                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <ImagePlus size={14} />
+                Add images to gallery
+              </button>
+              <button
+                type="button"
+                onClick={openTemporaryGalleryForNewDish}
+                disabled={isApiBusy}
+                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Choose for dish
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs">
+                  {temporaryGallery.length}
+                </span>
+              </button>
+            </div>
+          </div>
+          {temporaryGallery.length > 0 ? (
+            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+              {temporaryGallery.map((photo) => (
+                <div
+                  key={photo.id}
+                  className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-100"
+                >
+                  {isVideoUrl(photo.url, photo.type) ? (
+                    <video
+                      src={photo.url}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <img src={photo.url} alt="Temporary gallery item" className="h-full w-full object-cover" />
+                  )}
+                  {isVideoUrl(photo.url, photo.type) && (
+                    <span className="absolute bottom-1 left-1 rounded bg-black/65 px-1 text-[10px] text-white">
+                      Video
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-gray-400">No photos or videos added yet.</p>
+          )}
+          <input
+            ref={temporaryGalleryInputRef}
+            type="file"
+            accept="image/*,video/*"
+            multiple
+            onChange={(event) =>
+              void addFilesToTemporaryGallery(event.target.files)
+            }
+            className="hidden"
+          />
+        </section>
+      )}
+
       {restaurantDishes.length === 0 && !showAddDish && (
         <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-gray-300">
           <p className="text-gray-500 mb-4">No dishes added yet.</p>
           {editMode && (
             <button
-              onClick={() => openAddAndPick()}
+              onClick={() => openAddDishForm()}
               disabled={isApiBusy}
               className="text-red-500 font-medium hover:underline disabled:opacity-60 disabled:cursor-not-allowed"
             >
@@ -2264,26 +2290,14 @@ export default function RestaurantDetails() {
                             }
                             onRemovePhoto={handleRemoveEditingDishPhoto}
                           />
-                          <input
-                            ref={editDishPhotoInputRef}
-                            type="file"
-                            accept="*/*"
-                            multiple
-                            onChange={(event) =>
-                              addPhotosToEditingDish(event.target.files)
-                            }
-                            className="hidden"
-                          />
                           <button
                             type="button"
                             disabled={isApiBusy}
-                            onClick={() =>
-                              editDishPhotoInputRef.current?.click()
-                            }
+                            onClick={() => openTemporaryGalleryForEditingDish(dish.id)}
                             className="mt-2 inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             <ImagePlus size={14} />
-                            Add dish photos
+                            Add photos/videos from temporary gallery
                           </button>
                         </div>
 
@@ -2616,26 +2630,16 @@ export default function RestaurantDetails() {
 
                 <div>
                   <label className="block text-sm font-medium mb-1">
-                    Dish Photos
+                    Selected dish media
                   </label>
-                  <input
-                    ref={dishPhotoInputRef}
-                    type="file"
-                    accept="*/*"
-                    multiple
-                    onChange={(event) =>
-                      handleAddDishPhotos(event.target.files)
-                    }
-                    className="hidden"
-                  />
                   <button
                     type="button"
-                    onClick={() => dishPhotoInputRef.current?.click()}
+                    onClick={openTemporaryGalleryForNewDish}
                     disabled={isApiBusy}
-                    className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <ImagePlus size={14} />
-                    Upload photos
+                    Add photos/videos from temporary gallery
                   </button>
                   {newDishPhotos.length > 0 && (
                     <div className="mt-3">
@@ -2657,7 +2661,7 @@ export default function RestaurantDetails() {
                               checked={batchMode}
                               onChange={toggleBatchMode}
                             />
-                            Create separate dishes for each uploaded photo
+                            Create separate dishes for each selected photo
                           </label>
                           {batchMode && (
                             <div className="text-xs text-gray-500">
@@ -2802,26 +2806,16 @@ export default function RestaurantDetails() {
 
                   <div>
                     <label className="block text-sm font-medium mb-1">
-                      Dish Photos
+                      Selected dish media
                     </label>
-                    <input
-                      ref={dishPhotoInputRef}
-                      type="file"
-                      accept="*/*"
-                      multiple
-                      onChange={(event) =>
-                        handleAddDishPhotos(event.target.files)
-                      }
-                      className="hidden"
-                    />
                     <button
                       type="button"
-                      onClick={() => dishPhotoInputRef.current?.click()}
+                      onClick={openTemporaryGalleryForNewDish}
                       disabled={isApiBusy}
-                      className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <ImagePlus size={14} />
-                      Add more photos
+                      Add photos/videos from temporary gallery
                     </button>
                   </div>
 
@@ -3047,8 +3041,7 @@ export default function RestaurantDetails() {
                     setShowAddDish(false);
                     setAddDishError(null);
                     setDishNameDuplicateError(null);
-                    setUploadChoiceOpen(false);
-                    setPendingDishFiles([]);
+                    closeTemporaryGallery();
                     setBatchEntries([]);
                     setBatchMode(false);
                   }}
@@ -3073,76 +3066,125 @@ export default function RestaurantDetails() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {uploadChoiceOpen && (
+        {showTemporaryGallery && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[1300] flex items-start justify-center overflow-y-auto bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-8"
+            className="fixed inset-0 z-[1300] flex items-center justify-center bg-slate-950/55 p-3 backdrop-blur-sm sm:p-6"
+            onClick={closeTemporaryGallery}
           >
             <motion.div
-              initial={{ opacity: 0, y: 24, scale: 0.96 }}
+              initial={{ opacity: 0, y: 20, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 20, scale: 0.98 }}
-              transition={{ type: "spring", stiffness: 260, damping: 24 }}
-              className="flex w-full max-w-lg flex-col overflow-hidden rounded-[24px] border border-white/20 bg-white shadow-[0_30px_100px_rgba(15,23,42,0.35)] sm:rounded-[28px] max-h-[calc(100dvh-2rem)] sm:max-h-[min(90dvh,48rem)]"
+              exit={{ opacity: 0, y: 16, scale: 0.98 }}
+              onClick={(event) => event.stopPropagation()}
+              className="flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
             >
-              <div className="bg-gradient-to-br from-amber-400 via-orange-500 to-rose-500 px-5 py-5 text-white sm:px-6">
-                <div className="inline-flex items-center gap-2 rounded-full bg-white/20 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.25em] sm:text-xs">
-                  <ImagePlus size={12} />
-                  Photo import
+              <div className="flex items-start justify-between gap-4 border-b border-gray-100 p-4 sm:p-5">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">
+                    {gallerySelectionTarget.type === "restaurant"
+                      ? "Add media to restaurant"
+                      : gallerySelectionTarget.type === "edit"
+                        ? "Add media to dish"
+                        : "Choose from temporary gallery"}
+                  </h3>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Select photos or videos to add to this dish. This gallery is available until you leave this restaurant page.
+                  </p>
                 </div>
-                <h3 className="mt-4 text-xl font-black tracking-tight sm:text-2xl">
-                  How should these photos be saved?
-                </h3>
-                <p className="mt-2 max-w-md text-sm leading-6 text-white/90 mb-4">
-                  Choose whether the selected images belong to one dish or should become separate dishes with their own names and reviews.
-                </p>
-                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-white/30 scrollbar-track-transparent">
-                  {pendingDishFiles.map((file, i) => (
-                    <FilePreview key={i} file={file} />
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto space-y-4 px-5 py-5 sm:px-6">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => void applyPendingDishFiles(false)}
-                    className="group rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white active:scale-[0.99]"
-                  >
-                    <div className="text-sm font-bold text-slate-900">Same dish</div>
-                    <div className="mt-2 text-sm leading-6 text-slate-600">
-                      All selected photos attach to one dish.
-                    </div>
-                    <div className="mt-4 inline-flex rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
-                      One form
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => void applyPendingDishFiles(true)}
-                    className="group rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-amber-300 hover:from-amber-100 hover:to-orange-100 active:scale-[0.99]"
-                  >
-                    <div className="text-sm font-bold text-amber-950">Separate dishes</div>
-                    <div className="mt-2 text-sm leading-6 text-amber-900/80">
-                      Each photo becomes its own dish card with a review.
-                    </div>
-                    <div className="mt-4 inline-flex rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white shadow-sm">
-                      Multi form
-                    </div>
-                  </button>
-                </div>
-
                 <button
                   type="button"
-                  onClick={closeUploadChoiceModal}
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.99]"
+                  aria-label="Close temporary gallery"
+                  onClick={closeTemporaryGallery}
+                  className="rounded-full p-2 text-gray-500 hover:bg-gray-100"
                 >
-                  Cancel
+                  <X size={18} />
                 </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+                {temporaryGallery.length === 0 ? (
+                  <div className="flex min-h-48 flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 p-6 text-center">
+                    <ImagePlus size={28} className="mb-3 text-gray-400" />
+                    <p className="font-medium text-gray-700">Your temporary gallery is empty</p>
+                    <p className="mt-1 text-sm text-gray-500">Add photos and videos here first, then select them for your dish.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                    {temporaryGallery.map((photo) => {
+                      const selected = selectedGalleryPhotoIds.includes(photo.id);
+                      const isVideo = isVideoUrl(photo.url, photo.type);
+                      return (
+                        <button
+                          key={photo.id}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() =>
+                            setSelectedGalleryPhotoIds((current) =>
+                              selected
+                                ? current.filter((id) => id !== photo.id)
+                                : [...current, photo.id],
+                            )
+                          }
+                          className={`relative aspect-square overflow-hidden rounded-xl border-2 bg-gray-100 text-left transition ${selected ? "border-red-500 ring-2 ring-red-200" : "border-transparent hover:border-gray-300"}`}
+                        >
+                          {isVideo ? (
+                            <video
+                              src={photo.url}
+                              muted
+                              playsInline
+                              preload="metadata"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <img src={photo.url} alt="Temporary gallery item" className="h-full w-full object-cover" />
+                          )}
+                          <span className="absolute bottom-2 left-2 rounded bg-black/65 px-2 py-1 text-xs font-medium text-white">
+                            {isVideo ? "Video" : "Photo"}
+                          </span>
+                          {selected && (
+                            <span className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white">
+                              <Check size={15} />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 border-t border-gray-100 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                <button
+                  type="button"
+                  onClick={() => temporaryGalleryInputRef.current?.click()}
+                  disabled={isApiBusy}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  <ImagePlus size={15} />
+                  Add images to gallery
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={closeTemporaryGallery}
+                    className="flex-1 rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 sm:flex-none"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addSelectedGalleryPhotos}
+                    disabled={selectedGalleryPhotoIds.length === 0 || isApiBusy}
+                    className="flex-1 rounded-xl bg-red-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
+                  >
+                    {gallerySelectionTarget.type === "restaurant"
+                      ? `Add to restaurant (${selectedGalleryPhotoIds.length})`
+                      : `Add to dish (${selectedGalleryPhotoIds.length})`}
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
@@ -3151,7 +3193,7 @@ export default function RestaurantDetails() {
 
       {editMode && !showAddDish && (
         <button
-          onClick={() => openAddAndPick()}
+          onClick={() => openAddDishForm()}
           disabled={isApiBusy}
           className="fixed bottom-6 right-6 bg-black hover:bg-gray-800 text-white rounded-full p-4 shadow-2xl active:scale-95 transition-transform flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
         >
